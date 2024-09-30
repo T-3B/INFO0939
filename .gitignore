@@ -1,0 +1,4 @@
+# ignore any file without file-extension
+*
+!*.*
+!*/
