@@ -4,7 +4,6 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
-#include <mpi.h>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -61,6 +60,22 @@ int read_parameters(struct parameters *param, const char *filename)
   return 0;
 }
 
+void print_parameters(const struct parameters *param)
+{
+  printf("Parameters:\n");
+  printf(" - grid spacing (dx, dy): %g m, %g m\n", param->dx, param->dy);
+  printf(" - time step (dt): %g s\n", param->dt);
+  printf(" - maximum time (max_t): %g s\n", param->max_t);
+  printf(" - gravitational acceleration (g): %g m/s^2\n", param->g);
+  printf(" - dissipation coefficient (gamma): %g 1/s\n", param->gamma);
+  printf(" - source type: %d\n", param->source_type);
+  printf(" - sampling rate: %d\n", param->sampling_rate);
+  printf(" - input bathymetry (h) file: '%s'\n", param->input_h_filename);
+  printf(" - output elevation (eta) file: '%s'\n", param->output_eta_filename);
+  printf(" - output velocity (u, v) files: '%s', '%s'\n",
+         param->output_u_filename, param->output_v_filename);
+}
+
 int read_data(struct data *data, const char *filename)
 {
   FILE *fp = fopen(filename, "rb");
@@ -98,14 +113,40 @@ int read_data(struct data *data, const char *filename)
   return 0;
 }
 
-int write_data_vtk(const struct data *data, const char *name,
-                   const char *filename, int step, int rank)
+int write_data(const struct data *data, const char *filename, int step)
 {
   char out[512];
   if(step < 0)
-    sprintf(out, "%s_%d.vti", filename, rank);
+    sprintf(out, "%s.dat", filename);
   else
-    sprintf(out, "%s_%d_%d.vti", filename, rank, step);
+    sprintf(out, "%s_%d.dat", filename, step);
+  FILE *fp = fopen(out, "wb");
+  if(!fp) {
+    printf("Error: Could not open output data file '%s'\n", out);
+    return 1;
+  }
+  int ok = 1;
+  if(ok) ok = (fwrite(&data->nx, sizeof(int), 1, fp) == 1);
+  if(ok) ok = (fwrite(&data->ny, sizeof(int), 1, fp) == 1);
+  if(ok) ok = (fwrite(&data->dx, sizeof(double), 1, fp) == 1);
+  if(ok) ok = (fwrite(&data->dy, sizeof(double), 1, fp) == 1);
+  int N = data->nx * data->ny;
+  if(ok) ok = (fwrite(data->values, sizeof(double), N, fp) == N);
+  fclose(fp);
+  if(!ok) {
+    printf("Error writing data file '%s'\n", out);
+    return 1;
+  }
+  return 0;
+}
+
+int write_data_vtk(const struct data *data, const char *name, const char *filename, int step)
+{
+  char out[512];
+  if(step < 0)
+    sprintf(out, "%s.vti", filename);
+  else
+    sprintf(out, "%s_%d.vti", filename, step);
 
   FILE *fp = fopen(out, "wb");
   if(!fp) {
@@ -146,6 +187,33 @@ int write_data_vtk(const struct data *data, const char *name,
   return 0;
 }
 
+int write_manifest_vtk(const char *name, const char *filename, double dt, int nt, int sampling_rate)
+{
+  char out[512];
+  sprintf(out, "%s.pvd", filename);
+
+  FILE *fp = fopen(out, "wb");
+  if(!fp) {
+    printf("Error: Could not open output VTK manifest file '%s'\n", out);
+    return 1;
+  }
+
+  fprintf(fp, "<VTKFile type=\"Collection\" version=\"0.1\" "
+          "byte_order=\"LittleEndian\">\n");
+  fprintf(fp, "  <Collection>\n");
+  for(int n = 0; n < nt; n++) {
+    if(sampling_rate && !(n % sampling_rate)) {
+      double t = n * dt;
+      fprintf(fp, "    <DataSet timestep=\"%g\" file='%s_%d.vti'/>\n", t,
+              filename, n);
+    }
+  }
+  fprintf(fp, "  </Collection>\n");
+  fprintf(fp, "</VTKFile>\n");
+  fclose(fp);
+  return 0;
+}
+
 int init_data(struct data *data, int nx, int ny, double dx, double dy,
               double val)
 {
@@ -167,102 +235,145 @@ void free_data(struct data *data)
   free(data->values);
 }
 
-int main(int argc, char **argv)
-{
-  if(argc != 2) {
-    printf("Usage: %s parameter_file\n", argv[0]);
-    return 1;
-  }
+double interpolate_data(const struct data *data, double x, double y)
+{  // TODO could store GET values between calls (multiple points could be in the same small square v00 v01 v10 v11)
+  int i = (int) (x / data->dx);
+  int j = (int) (y / data->dy);
+  
+  if(i < 0) i = 0;
+  else if(i > data->nx - 1) i = data->nx - 1;
+  if(j < 0) j = 0;
+  else if(j > data->ny - 1) j = data->ny - 1;
 
-  MPI_Init(&argc, &argv);
-
-  int rank, size;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-  struct parameters param;
-  if(rank == 0) {
-    if(read_parameters(&param, argv[1])) {
-      MPI_Finalize();
-      return 1;
-    }
-  }
-  MPI_Bcast(&param, sizeof(struct parameters), MPI_BYTE, 0, MPI_COMM_WORLD);
-
-  struct data h;
-  if(rank == 0) {
-    if(read_data(&h, param.input_h_filename)) {
-      MPI_Finalize();
-      return 1;
-    }
-  }
-
-  MPI_Bcast(&h.nx, 1, MPI_INT, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&h.ny, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-  int local_ny = h.ny / size;
-  int start_y = rank * local_ny;
-  int end_y = start_y + local_ny;
-
-  struct data local_eta, local_u, local_v;
-  init_data(&local_eta, h.nx, local_ny, param.dx, param.dy, 0.);
-  init_data(&local_u, h.nx + 1, local_ny, param.dx, param.dy, 0.);
-  init_data(&local_v, h.nx, local_ny + 1, param.dx, param.dy, 0.);
-
-  for(int t = 0; t < param.max_t / param.dt; t++) {
-   
-   // Update eta (Continuity equation)
-    for (int i = 1; i < nx - 1; i++) {
-        for (int j = 1; j < ny - 1; j++) {
-            double hu_x = (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j)) - (GET(&h_interp, i, j) * GET(&u, i, j));
-            double hv_y = (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1)) - (GET(&h_interp, i, j) * GET(&v, i, j));
-            double eta_update = -(hu_x / param.dx) - (hv_y / param.dy);
-            SET(&eta, i, j, GET(&eta, i, j) + param.dt * eta_update);
-        }
-    }
-
-    // Impose boundary conditions (source term or other)
-    double t = n * param.dt;
-    if (param.source_type == 1) {
-        // Sinusoidal boundary condition on top for v
-        double A = 5;
-        double f = 1. / 20.;
-        for (int i = 0; i < nx; i++) {
-            SET(&v, i, ny - 1, A * sin(2 * M_PI * f * t));
-        }
-    }
-
-    // Update u (Momentum equation in x-direction)
-    for (int i = 1; i < nx - 1; i++) {
-        for (int j = 1; j < ny - 1; j++) {
-            double eta_x = (GET(&eta, i, j) - GET(&eta, i - 1, j)) / param.dx;
-            double u_update = -param.g * eta_x - param.gamma * GET(&u, i, j);
-            SET(&u, i, j, GET(&u, i, j) + param.dt * u_update);
-        }
-    }
-
-    // Update v (Momentum equation in y-direction)
-    for (int i = 1; i < nx - 1; i++) {
-        for (int j = 1; j < ny - 1; j++) {
-            double eta_y = (GET(&eta, i, j) - GET(&eta, i, j - 1)) / param.dy;
-            double v_update = -param.g * eta_y - param.gamma * GET(&v, i, j);
-            SET(&v, i, j, GET(&v, i, j) + param.dt * v_update);
-        }
-    }
-
-    if(param.sampling_rate && !(t % param.sampling_rate)) {
-      write_data_vtk(&local_eta, "eta", param.output_eta_filename, t, rank);
-      write_data_vtk(&local_u, "u", param.output_u_filename, t, rank);
-      write_data_vtk(&local_v, "v", param.output_v_filename, t, rank);
-    }
-  }
-
-  free_data(&local_eta);
-  free_data(&local_u);
-  free_data(&local_v);
-
-  MPI_Finalize();
-
-  return 0;
+  double v00 = GET(data, i, j);         // Top-left
+  double v10 = GET(data, i + 1, j);     // Top-right
+  double v01 = GET(data, i, j + 1);     // Bottom-left
+  double v11 = GET(data, i + 1, j + 1); // Bottom-right  
+  // Interpolate along the x direction
+  double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
+  double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
+  // Interpolate along the y direction and return the result
+  return (double) (v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
 }
 
+
+int main(int argc, char **argv) {
+    MPI_Init(&argc, &argv);
+
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    if (argc != 2) {
+        if (rank == 0) printf("Usage: %s parameter_file\n", argv[0]);
+        MPI_Finalize();
+        return 1;
+    }
+
+    struct parameters param;
+    if (rank == 0) {
+        if (read_parameters(&param, argv[1])) {
+            MPI_Finalize();
+            return 1;
+        }
+    }
+    MPI_Bcast(&param, sizeof(struct parameters), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    struct data h;
+    if (rank == 0) {
+        if (read_data(&h, param.input_h_filename)) {
+            MPI_Finalize();
+            return 1;
+        }
+    }
+
+    MPI_Bcast(&h.nx, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&h.ny, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    int local_nx = h.nx / size;
+    int local_ny = h.ny;
+
+    struct data local_eta, local_u, local_v, local_h_interp;
+    init_data(&local_eta, local_nx, local_ny, param.dx, param.dy, 0.0);
+    init_data(&local_u, local_nx + 1, local_ny, param.dx, param.dy, 0.0);
+    init_data(&local_v, local_nx, local_ny + 1, param.dx, param.dy, 0.0);
+    init_data(&local_h_interp, local_nx, local_ny, param.dx, param.dy, 0.0);
+
+    // Interpolate bathymetry
+    for (int j = 0; j < local_ny; j++) {
+        for (int i = 0; i < local_nx; i++) {
+            double x = (rank * local_nx + i) * param.dx;
+            double y = j * param.dy;
+            double val = interpolate_data(&h, x, y);
+            SET(&local_h_interp, i, j, val);
+        }
+    }
+
+    double start = MPI_Wtime();
+    int nt = floor(param.max_t / param.dt);
+
+    for (int n = 0; n < nt; n++) {
+        if (n && (n % (nt / 10)) == 0 && rank == 0) {
+            double time_sofar = MPI_Wtime() - start;
+            double eta = (nt - n) * time_sofar / n;
+            printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
+            fflush(stdout);
+        }
+
+        // Impose boundary conditions
+        double t = n * param.dt;
+        if (param.source_type == 1) {
+            double A = 5;
+            double f = 1. / 20.;
+            for (int i = 0; i < local_nx; i++) {
+                SET(&local_v, i, local_ny - 1, A * sin(2 * M_PI * f * t));
+            }
+        }
+
+        // Update eta (continuity equation)
+        for (int i = 1; i < local_nx - 1; i++) {
+            for (int j = 1; j < local_ny - 1; j++) {
+                double hu_x = (GET(&local_h_interp, i + 1, j) * GET(&local_u, i + 1, j)) - (GET(&local_h_interp, i, j) * GET(&local_u, i, j));
+                double hv_y = (GET(&local_h_interp, i, j + 1) * GET(&local_v, i, j + 1)) - (GET(&local_h_interp, i, j) * GET(&local_v, i, j));
+                double eta_update = -(hu_x / param.dx) - (hv_y / param.dy);
+                SET(&local_eta, i, j, GET(&local_eta, i, j) + param.dt * eta_update);
+            }
+        }
+
+        // Update u (momentum equation in x-direction)
+        for (int i = 1; i < local_nx - 1; i++) {
+            for (int j = 1; j < local_ny - 1; j++) {
+                double eta_x = (GET(&local_eta, i, j) - GET(&local_eta, i - 1, j)) / param.dx;
+                double u_update = -param.g * eta_x - param.gamma * GET(&local_u, i, j);
+                SET(&local_u, i, j, GET(&local_u, i, j) + param.dt * u_update);
+            }
+        }
+
+        // Update v (momentum equation in y-direction)
+        for (int i = 1; i < local_nx - 1; i++) {
+            for (int j = 1; j < local_ny - 1; j++) {
+                double eta_y = (GET(&local_eta, i, j) - GET(&local_eta, i, j - 1)) / param.dy;
+                double v_update = -param.g * eta_y - param.gamma * GET(&local_v, i, j);
+                SET(&local_v, i, j, GET(&local_v, i, j) + param.dt * v_update);
+            }
+        }
+
+        // Output local data periodically
+        if (param.sampling_rate && !(n % param.sampling_rate)) {
+	  write_data_vtk(&local_eta, "water elevation", param.output_eta_filename, n);
+          //write_data_vtk(&local_u, "x velocity", param.output_u_filename, n);
+          //write_data_vtk(&local_v, "y velocity", param.output_v_filename, n);
+        }
+    }
+
+    write_manifest_vtk("water elevation", param.output_eta_filename, param.dt, nt, param.sampling_rate);
+
+    free_data(&local_h_interp);
+    free_data(&local_eta);
+    free_data(&local_u);
+    free_data(&local_v);
+
+    MPI_Finalize();
+
+    return 0;
+}
