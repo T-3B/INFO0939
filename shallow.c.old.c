@@ -1,3 +1,10 @@
+// Changelog
+// * 24/09/2024: initial version
+// * 01/10/2024: fix init_data() for eta (dx -> dy), remove unused arg in
+//   write_manifest_vtk()
+// * 10/10/2024: replace unsigned long with uint64_t in write_data_vtk() to fix
+//   issue on Windows
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -155,8 +162,8 @@ int write_data_vtk(const struct data *data, const char *name,
     return 1;
   }
 
-  unsigned long num_points = data->nx * data->ny;
-  unsigned long num_bytes = num_points * sizeof(double);
+  uint64_t num_points = data->nx * data->ny;
+  uint64_t num_bytes = num_points * sizeof(double);
 
   fprintf(fp, "<?xml version=\"1.0\"?>\n");
   fprintf(fp, "<VTKFile type=\"ImageData\" version=\"1.0\" "
@@ -178,7 +185,7 @@ int write_data_vtk(const struct data *data, const char *name,
 
   fprintf(fp, "  <AppendedData encoding=\"raw\">\n_");
 
-  fwrite(&num_bytes, sizeof(unsigned long), 1, fp);
+  fwrite(&num_bytes, sizeof(uint64_t), 1, fp);
   fwrite(data->values, sizeof(double), num_points, fp);
 
   fprintf(fp, "  </AppendedData>\n");
@@ -188,8 +195,8 @@ int write_data_vtk(const struct data *data, const char *name,
   return 0;
 }
 
-int write_manifest_vtk(const char *name, const char *filename,
-                       double dt, int nt, int sampling_rate)
+int write_manifest_vtk(const char *filename, double dt, int nt,
+                       int sampling_rate)
 {
   char out[512];
   sprintf(out, "%s.pvd", filename);
@@ -239,31 +246,17 @@ void free_data(struct data *data)
 
 double interpolate_data(const struct data *data, double x, double y)
 {
-  // Bilinear interpolation implementation -> extension of 1D interpolation to function of 2 variable
-  // We want to know f(x,y) assuming we know the value of f at the 4 corners around that point in the mesh
-  // First we need to get the indices of the corners
-  int i = (int) (x / data->dx); // Cast to int to have the nearest integer from the origin  
-  int j = (int) (y / data->dy);
-  
-  // Now we need to check that these indices are in the bound of the grid -> otherwise big segfault 
-  if (i < 0) i = 0;
-    else if (i >= data->nx - 1) i = data->nx - 2;  // Ensure we have room for interpolation
-  if (j < 0) j = 0;
-    else if (j >= data->ny - 1) j = data->ny - 2;  // Ensure we have room for interpolation
+  // TODO: this returns the nearest neighbor, should implement actual
+  // interpolation instead
+  int i = (int)(x / data->dx);
+  int j = (int)(y / data->dy);
+  if(i < 0) i = 0;
+  else if(i > data->nx - 1) i = data->nx - 1;
+  if(j < 0) j = 0;
+  else if(j > data->ny - 1) j = data->ny - 1;
 
-  // Third step obtain the value at these corners
-  double v00 = GET(data, i, j);         // Top-left
-  double v10 = GET(data, i + 1, j);     // Top-right
-  double v01 = GET(data, i, j + 1);     // Bottom-left
-  double v11 = GET(data, i + 1, j + 1); // Bottom-right
-
-  
-  // Interpolate along the x direction
-  double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
-  double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
-
-  // Interpolate along the y direction and return the result
-  return (double) (v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
+  double val = GET(data, i, j);
+  return val;
 }
 
 int main(int argc, char **argv)
@@ -280,7 +273,7 @@ int main(int argc, char **argv)
   struct data h;
   if(read_data(&h, param.input_h_filename)) return 1;
 
-  // infer size of domain from input elevation data
+  // infer size of domain from input bathymetric data
   double hx = h.nx * h.dx;
   double hy = h.ny * h.dy;
   int nx = floor(hx / param.dx);
@@ -294,7 +287,7 @@ int main(int argc, char **argv)
   printf(" - number of time steps: %d\n", nt);
 
   struct data eta, u, v;
-  init_data(&eta, nx, ny, param.dx, param.dx, 0.);
+  init_data(&eta, nx, ny, param.dx, param.dy, 0.);
   init_data(&u, nx + 1, ny, param.dx, param.dy, 0.);
   init_data(&v, nx, ny + 1, param.dx, param.dy, 0.);
 
@@ -387,12 +380,12 @@ int main(int argc, char **argv)
 
   }
 
-  write_manifest_vtk("water elevation", param.output_eta_filename,
-                     param.dt, nt, param.sampling_rate);
-  //write_manifest_vtk("x velocity", param.output_u_filename,
-  //                   param.dt, nt, param.sampling_rate);
-  //write_manifest_vtk("y velocity", param.output_v_filename,
-  //                   param.dt, nt, param.sampling_rate);
+  write_manifest_vtk(param.output_eta_filename, param.dt, nt,
+                     param.sampling_rate);
+  //write_manifest_vtk(param.output_u_filename, param.dt, nt,
+  //                   param.sampling_rate);
+  //write_manifest_vtk(param.output_v_filename, param.dt, nt,
+  //                   param.sampling_rate);
 
   double time = GET_TIME() - start;
   printf("\nDone: %g seconds (%g MUpdates/s)\n", time,

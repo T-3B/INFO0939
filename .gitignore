@@ -1,4 +1,7 @@
 # ignore any file without file-extension
-*
-!*.*
-!*/
+output/
+project2024.pdf
+shallow_serial
+shallow_omp
+shallow_mpi
+shallow
