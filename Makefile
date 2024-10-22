@@ -1,5 +1,5 @@
 CC		= clang
-CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23
+CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas
 LDLIBS	= -lm
 MPICC	= mpicc
 OMP		= -fopenmp

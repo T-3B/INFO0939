@@ -277,9 +277,8 @@ int main(const int argc, const char *const *const argv) {
   // interpolate bathymetry
   struct data h_interp;
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-#ifdef _OPENMP
+
   #pragma omp parallel for collapse(2)
-#endif
   for (int j = 0; j < ny; j++)
     for (int i = 0; i < nx; i++)
       SET(&h_interp, i, j, interpolate_data(&h, i * param.dx, j * param.dy));
@@ -325,9 +324,8 @@ int main(const int argc, const char *const *const argv) {
       printf("Error: Unknown source type %d\n", param.source_type);
       exit(0);
     }
-#ifdef _OPENMP
+
     #pragma omp parallel for collapse(2)
-#endif
     for (int j = 0; j < ny; j++) {  // CHANGED (question 4)
       for (int i = 0; i < nx; i++) {
         // update eta
