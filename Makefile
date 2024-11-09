@@ -1,10 +1,13 @@
 CC		= clang
+OMPI_CC	= $(CC)
 CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas
 LDLIBS	= -lm
 MPICC	= mpicc -DUSE_MPI
 OMP		= -fopenmp
 SRC		= shallow.c
 TARGET	= shallow
+
+export OMPI_CC
 
 all: omp_mpi mpi omp serial
 
