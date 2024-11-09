@@ -6,17 +6,34 @@
 #include <string.h>
 #include <time.h>
 
+#define unlikely(x) __builtin_expect((x), 0)
+#define likely(x) __builtin_expect((x), 1)
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-#ifdef MPI_VERSION
-#include <mpi.h>
-#define GET_TIME() (MPI_Wtime())  // wall time
-#elifdef _OPENMP
-#define GET_TIME() (omp_get_wtime())  // wall time
+#ifdef USE_MPI
+# include <mpi.h>
+# define ABORT() MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE)
+# define GET_TIME() (MPI_Wtime())  // wall time
+  enum neighbor { UP, DOWN, LEFT, RIGHT };
+  static void checkMPISuccess(const int code) {
+    if (unlikely(code != MPI_SUCCESS)) {
+      char err_str[MPI_MAX_ERROR_STRING];
+      int err_len;  // TODO what about NULL?
+      fputs(MPI_Error_string(code, err_str, &err_len) == MPI_SUCCESS ? err_str : "MPI error!", stderr);
+      fputc('\n', stderr);
+      MPI_Abort(MPI_COMM_WORLD, code);
+    }
+  }
 #else
-#define GET_TIME() ((double)clock() / CLOCKS_PER_SEC)  // cpu time
+# define ABORT() exit(EXIT_FAILURE)
+# ifdef _OPENMP
+#  define GET_TIME() (omp_get_wtime())  // wall time
+# else
+#  define GET_TIME() ((double)clock() / CLOCKS_PER_SEC)  // cpu time
+# endif
 #endif
 
 struct parameters {
@@ -43,25 +60,25 @@ static inline int max(const int a, const int b) { return a > b ? a : b;}
 
 static int read_parameters(struct parameters *restrict const param, const char *restrict const filename) {
   FILE *const fp = fopen(filename, "r");
-  if (!fp) {
+  if (unlikely(!fp)) {
     printf("Error: Could not open parameter file '%s'\n", filename);
     return 1;
   }
-  int ok = 1;
-  if (ok) ok = (fscanf(fp, "%lf", &param->dx) == 1);
-  if (ok) ok = (fscanf(fp, "%lf", &param->dy) == 1);
-  if (ok) ok = (fscanf(fp, "%lf", &param->dt) == 1);
-  if (ok) ok = (fscanf(fp, "%lf", &param->max_t) == 1);
-  if (ok) ok = (fscanf(fp, "%lf", &param->g) == 1);
-  if (ok) ok = (fscanf(fp, "%lf", &param->gamma) == 1);
-  if (ok) ok = (fscanf(fp, "%d", &param->source_type) == 1);
-  if (ok) ok = (fscanf(fp, "%d", &param->sampling_rate) == 1);
-  if (ok) ok = (fscanf(fp, "%256s", param->input_h_filename) == 1);
-  if (ok) ok = (fscanf(fp, "%256s", param->output_eta_filename) == 1);
-  if (ok) ok = (fscanf(fp, "%256s", param->output_u_filename) == 1);
-  if (ok) ok = (fscanf(fp, "%256s", param->output_v_filename) == 1);
+  _Bool ok = 1;
+  if (likely(ok)) ok = fscanf(fp, "%lf", &param->dx) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%lf", &param->dy) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%lf", &param->dt) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%lf", &param->max_t) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%lf", &param->g) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%lf", &param->gamma) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%d", &param->source_type) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%d", &param->sampling_rate) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%256s", param->input_h_filename) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%256s", param->output_eta_filename) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%256s", param->output_u_filename) == 1;
+  if (likely(ok)) ok = fscanf(fp, "%256s", param->output_v_filename) == 1;
   fclose(fp);
-  if (!ok) {
+  if (unlikely(!ok)) {
     printf("Error: Could not read one or more parameters in '%s'\n", filename);
     return 1;
   }
@@ -84,31 +101,31 @@ static void print_parameters(const struct parameters *const param) {
 
 static int read_data(struct data *restrict const data, const char *restrict const filename) {
   FILE *const fp = fopen(filename, "rb");
-  if (!fp) {
+  if (unlikely(!fp)) {
     printf("Error: Could not open input data file '%s'\n", filename);
     return 1;
   }
-  int ok = 1;
-  if (ok) ok = (fread(&data->nx, sizeof(int), 1, fp) == 1);
-  if (ok) ok = (fread(&data->ny, sizeof(int), 1, fp) == 1);
-  if (ok) ok = (fread(&data->dx, sizeof(double), 1, fp) == 1);
-  if (ok) ok = (fread(&data->dy, sizeof(double), 1, fp) == 1);
-  if (ok) {
+  _Bool ok = 1;
+  if (likely(ok)) ok = fread(&data->nx, sizeof(int), 1, fp) == 1;
+  if (likely(ok)) ok = fread(&data->ny, sizeof(int), 1, fp) == 1;
+  if (likely(ok)) ok = fread(&data->dx, sizeof(double), 1, fp) == 1;
+  if (likely(ok)) ok = fread(&data->dy, sizeof(double), 1, fp) == 1;
+  if (likely(ok)) {
     const int N = data->nx * data->ny;
-    if (N <= 0) {
+    if (unlikely(N <= 0)) {
       printf("Error: Invalid number of data points %d\n", N);
       ok = 0;
     } else {
       data->values = malloc(N * sizeof(double));
-      if (!data->values) {
+      if (unlikely(!data->values)) {
         printf("Error: Could not allocate data (%d doubles)\n", N);
         ok = 0;
       } else
-        ok = (fread(data->values, sizeof(double), N, fp) == N);
+        ok = fread(data->values, sizeof(double), N, fp) == N;
     }
   }
   fclose(fp);
-  if (!ok) {
+  if (unlikely(!ok)) {
     printf("Error reading input data file '%s'\n", filename);
     return 1;
   }
@@ -122,19 +139,19 @@ static int write_data(const struct data *restrict const data, const char *restri
   else
     sprintf(out, "%s_%d.dat", filename, step);
   FILE *const fp = fopen(out, "wb");
-  if (!fp) {
+  if (unlikely(!fp)) {
     printf("Error: Could not open output data file '%s'\n", out);
     return 1;
   }
-  int ok = 1;
-  if (ok) ok = (fwrite(&data->nx, sizeof(int), 1, fp) == 1);
-  if (ok) ok = (fwrite(&data->ny, sizeof(int), 1, fp) == 1);
-  if (ok) ok = (fwrite(&data->dx, sizeof(double), 1, fp) == 1);
-  if (ok) ok = (fwrite(&data->dy, sizeof(double), 1, fp) == 1);
+  _Bool ok = 1;
+  if (likely(ok)) ok = (fwrite(&data->nx, sizeof(int), 1, fp) == 1);
+  if (likely(ok)) ok = (fwrite(&data->ny, sizeof(int), 1, fp) == 1);
+  if (likely(ok)) ok = (fwrite(&data->dx, sizeof(double), 1, fp) == 1);
+  if (likely(ok)) ok = (fwrite(&data->dy, sizeof(double), 1, fp) == 1);
   const int N = data->nx * data->ny;
-  if (ok) ok = (fwrite(data->values, sizeof(double), N, fp) == N);
+  if (likely(ok)) ok = (fwrite(data->values, sizeof(double), N, fp) == N);
   fclose(fp);
-  if (!ok) {
+  if (unlikely(!ok)) {
     printf("Error writing data file '%s'\n", out);
     return 1;
   }
@@ -149,7 +166,7 @@ static int write_data_vtk(const struct data *restrict const data, const char *re
     sprintf(out, "%s_%d.vti", filename, step);
 
   FILE *const fp = fopen(out, "wb");
-  if (!fp) {
+  if (unlikely(!fp)) {
     printf("Error: Could not open output VTK file '%s'\n", out);
     return 1;
   }
@@ -188,7 +205,7 @@ static int write_manifest_vtk(const char *restrict const filename, const double 
   const char *const base_filename = basename((char *)filename);
 
   FILE *const fp = fopen(out, "wb");
-  if (!fp) {
+  if (unlikely(!fp)) {
     printf("Error: Could not open output VTK manifest file '%s'\n", out);
     return 1;
   }
@@ -212,11 +229,11 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
   data->dx = dx;
   data->dy = dy;
   data->values = malloc(nx * ny * sizeof(double));
-  if (!data->values){
+  if (unlikely(!data->values)){
     printf("Error: Could not allocate data\n");
     return 1;
   }
-  for (int i = 0; i < nx * ny; i++)
+  for (unsigned i = nx * ny; i--;)
     data->values[i] = val;
   return 0;
 }
@@ -246,18 +263,29 @@ static double interpolate_data(const struct data *const data, const double x, co
   return v0 + ((y - j * data->dy) / data->dy) * (v1 - v0);
 }
 
-int main(const int argc, const char *const *const argv) {
-  if (argc != 2) {
+int main(int argc, char **argv) {
+#ifdef USE_MPI
+  checkMPISuccess(MPI_Init(&argc, &argv));
+#endif
+
+  if (unlikely(argc != 2)) {
     printf("Usage: %s parameter_file\n", argv[0]);
-    return 1;
+    ABORT();
   }
 
+#ifdef USE_MPI
+  int rank, size;
+  checkMPISuccess(MPI_Comm_size(MPI_COMM_WORLD, &size));
+  checkMPISuccess(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
+  if (!rank) {  // master thread
+#endif
+
   struct parameters param;
-  if (read_parameters(&param, argv[1])) return 1;
+  if (unlikely(read_parameters(&param, argv[1]))) ABORT();
   print_parameters(&param);
 
   struct data h;
-  if (read_data(&h, param.input_h_filename)) return 1;
+  if (unlikely(read_data(&h, param.input_h_filename))) ABORT();
 
   // infer size of domain from input elevation data
   const double hx = h.nx * h.dx;
@@ -314,7 +342,7 @@ int main(const int argc, const char *const *const argv) {
         SET(&v, i, 0, 0.);
         SET(&v, i, ny, A * sin(2 * M_PI * f * t));
       }
-    } else if(param.source_type == 2) {
+    } else if (param.source_type == 2) {
       // sinusoidal elevation in the middle of the domain
       const double A = 5;
       const double f = 1. / 20.;
@@ -322,19 +350,19 @@ int main(const int argc, const char *const *const argv) {
     } else {
       // TODO: add other sources
       printf("Error: Unknown source type %d\n", param.source_type);
-      exit(0);
+      ABORT();
     }
 
     #pragma omp parallel for collapse(2)
     for (int j = 0; j < ny; j++) {  // CHANGED (question 4)
       for (int i = 0; i < nx; i++) {
         // update eta
-        // TODO: this does not evaluate h at the correct locations
         const double h_ij = GET(&h_interp, i, j);
-        const double c0 = param.dt * h_ij;
-        const double eta_ij = GET(&eta, i, j)
-          - c0 / param.dx * (GET(&u, i + 1, j) - GET(&u, i, j))
-          - c0 / param.dy * (GET(&v, i, j + 1) - GET(&v, i, j));
+        double u_ij = GET(&u, i, j);
+        double v_ij = GET(&v, i, j);
+        const double eta_ij = GET(&eta, i, j) - param.dt * (
+          (GET(&h_interp, i >= nx - 1 ? i : i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
+          + (GET(&h_interp, i, j >= ny - 1 ? j : j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
         SET(&eta, i, j, eta_ij);
 
         // update u and v
@@ -342,8 +370,8 @@ int main(const int argc, const char *const *const argv) {
         const double c2 = param.dt * param.gamma;
         const double eta_imj = i ? GET(&eta, i - 1, j) : eta_ij;
         const double eta_ijm = j ? GET(&eta, i, j - 1) : eta_ij;
-        const double u_ij = (1. - c2) * GET(&u, i, j) - c1 / param.dx * (eta_ij - eta_imj);
-        const double v_ij = (1. - c2) * GET(&v, i, j) - c1 / param.dy * (eta_ij - eta_ijm);
+        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
+        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
         SET(&u, i, j, u_ij);
         SET(&v, i, j, v_ij);
       }
@@ -361,6 +389,11 @@ int main(const int argc, const char *const *const argv) {
   free_data(&eta);
   free_data(&u);
   free_data(&v);
-
-  return 0;
+#ifdef USE_MPI
+  } else {  // slave threads
+    ;
+  }
+  checkMPISuccess(MPI_Finalize());
+#endif
+  return EXIT_SUCCESS;
 }

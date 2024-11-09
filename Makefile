@@ -1,7 +1,7 @@
 CC		= clang
 CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas
 LDLIBS	= -lm
-MPICC	= mpicc
+MPICC	= mpicc -DUSE_MPI
 OMP		= -fopenmp
 SRC		= shallow.c
 TARGET	= shallow

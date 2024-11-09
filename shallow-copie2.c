@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
 #endif
   {
     struct parameters param;
-    struct data h;
+    struct data h, h_new;
     if (!global_rank) {
       if (unlikely(read_parameters(&param, argv[1]))) ABORT();
       print_parameters(&param);
@@ -312,53 +312,113 @@ int main(int argc, char **argv) {
     MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     puts("HELLO WORLD!1");
 
-    // infer size of domain from input elevation data
-    const double hx = h.nx * h.dx;
-    const double hy = h.ny * h.dy;
-    const int global_nx = max(1, floor(hx / param.dx));
-    const int global_ny = max(1, floor(hy / param.dy));
-    if (global_nx < hor_factor || global_ny < ver_factor) ABORT();
-    const int nx = global_nx / hor_factor;
-    const int ny = global_ny / ver_factor;
-    const int nt = floor(param.max_t / param.dt);
+    //const int global_nx = h.nx;
+    //const int global_ny = h.ny;
+    //const int nx = global_nx / hor_factor;
+    //const int ny = global_ny / ver_factor;
+    //if (!nx || !ny) ABORT();
     
-    printf("Rank = %4d - Coords = (%3d, %3d)"
-         " - Neighbors (up, down, left, right) = (%3d, %3d, %3d, %3d)\n",
-            global_rank, coords[0], coords[1], 
-            neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
-    printf("Size: %d x %d\n", nx, ny);
+    //printf("Rank = %4d - Coords = (%3d, %3d)"
+         //" - Neighbors (up, down, left, right) = (%3d, %3d, %3d, %3d)\n",
+            //global_rank, coords[0], coords[1], 
+            //neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
     
     
-    MPI_Datatype type, resizedtype;
-    int sizes[2]    = {global_nx, global_ny};
-    int subsizes[2] = {nx, ny};
-    int starts[2]   = {};
-    MPI_Type_create_subarray(2, sizes, subsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &type);  
-    MPI_Type_create_resized(type, 0, ny * sizeof(double), &resizedtype);
-    MPI_Type_commit(&resizedtype);
-    int *counts, *displs;
-    if (!(counts = malloc(global_size * sizeof *counts)) || !(displs = malloc(global_size * sizeof *displs))) ABORT();
-    memset(counts, 1, global_size);
-    int disp = 0;
-    for (unsigned i = 0; i < dims[0]; i++, disp+=(nx-1)*dims[1]) {
-      for (unsigned j = 0; j < dims[1]; j++, disp++) {
-        displs[i * dims[1] + j] = (_Bool) disp;
-        printf("%d, displs[%d] = %d\n", global_rank, i * dims[1] + j, (_Bool) disp);
+    //MPI_Datatype type, resizedtype;
+    //int sizes[2]    = {global_nx, global_ny};
+    //int subsizes[2] = {nx, ny};
+    //int starts[2]   = {0, 0};
+    //MPI_Type_create_subarray(2, sizes, subsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &type);  
+    //MPI_Type_create_resized(type, 0, ny * sizeof(double), &resizedtype);
+    //MPI_Type_commit(&resizedtype);
+    //int *counts, *displs;
+    //if (!(counts = malloc(global_size * sizeof *counts)) || !(displs = malloc(global_size * sizeof *displs))) ABORT();
+    //memset(counts, 1, global_size);
+    //int disp = 0;
+    //for (unsigned i = 0; i < dims[0]; i++, disp+=(nx-1)*dims[1]) {
+      //for (unsigned j = 0; j < dims[1]; j++, disp++) {
+        //displs[i * dims[1] + j] = (_Bool) disp;
+        //printf("%d, displs[%d] = %d\n", global_rank, i * dims[1] + j, (_Bool) disp);
+      //}
+    //}
+    //printf("%dx%d %dx%d\n", global_nx, global_ny, nx, ny);
+    
+    //struct data h_new = {};
+    //h_new.values = malloc(nx * ny * sizeof *h_new.values);
+    //MPI_Scatterv(h.values, counts, displs, resizedtype, h_new.values, nx*ny, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+
+
+
+    const int gridsize=h.nx; // size of grid
+    const int gridsizex=h.ny; // size of grid
+    const int procgridsize=dims[0];  // size of process grid
+    const int procgridsizex=dims[1];  // size of process grid
+
+    //if (rank == 0) {
+        ///* fill in the array, and print it */
+        //malloc2dchar(&global, gridsize, gridsizex);
+        //for (int i=0; i<gridsize; i++) {
+            //for (int j=0; j<gridsizex; j++)
+                //global[i][j] = (double) '0'+(3*i+j)%10;
+        //}
+
+
+        //printf("Global array is:\n");
+        //for (int i=0; i<gridsize; i++) {
+            //for (int j=0; j<gridsizex; j++)
+                //printf("%lf ", global[i][j]);
+
+            //putchar('\n');
+        //}
+    //}
+
+    /* create the local array which we'll process */
+    //malloc2dchar(&local, gridsize/procgridsize, gridsizex/procgridsizex);
+    h_new.values = malloc(gridsize/procgridsize * gridsizex/procgridsizex * sizeof *h_new.values);
+
+    /* create a datatype to describe the subarrays of the global array */
+    int sizes[2]    = {gridsize, gridsizex};         /* global size */
+    int subsizes[2] = {gridsize/procgridsize, gridsizex/procgridsizex};     /* local size */
+    int starts[2]   = {0,0};                        /* where this one starts */
+    MPI_Datatype type, subarrtype;
+    MPI_Type_create_subarray(2, sizes, subsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &type);
+    MPI_Type_create_resized(type, 0, gridsizex/procgridsizex*sizeof(double), &subarrtype);
+    MPI_Type_commit(&subarrtype);
+
+
+    /* scatter the array to all processors */
+    int sendcounts[global_size];
+    int displs[global_size];
+
+    if (!global_rank) {
+      for (int i=0, disp=0; i<procgridsize; i++, disp+=(gridsize/procgridsize-1)*procgridsizex) {
+        for (int j=0; j<procgridsizex; j++, disp++) {
+          const int idx = i*procgridsizex+j;
+          displs[idx] = disp;
+          sendcounts[idx] = 1;
+        }
       }
     }
 
-    //if (global_rank) {
-      //if (!(h.values = malloc(nx * ny * sizeof *h.values))) ABORT();
-      //MPI_Scatterv(NULL, counts, displs, resizedtype, h.values, nx*ny, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    //} else
-      //MPI_Scatterv(h.values, counts, displs, resizedtype, MPI_IN_PLACE, 0, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    MPI_Scatterv(global_rank ? NULL : h.values, sendcounts, displs, subarrtype, h_new.values,
+                 gridsize*gridsizex/(procgridsize*procgridsizex), MPI_DOUBLE,
+                 0, MPI_COMM_WORLD);
+                 
+                 
+                 
     
-    struct data h_new = {};
-    MPI_Scatterv(h.values, counts, displs, resizedtype, h_new.values, nx*ny, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    int nt = 6, nx = 4, ny = 6;
     
-    
-    
+    MPI_Barrier(MPI_COMM_WORLD);
+    h_new.nx = gridsize/procgridsize;
+    h_new.ny = gridsizex/procgridsizex;
     puts("HELLO WORLD!2");
+    for (int i=0; i<gridsize/procgridsize; i++)
+        for (int j=0; j<gridsizex/procgridsizex; j++)
+          nt += GET(&h_new, i, j);
+    ABORT();
 
     struct data eta, u, v;
     init_data(&eta, nx, ny, param.dx, param.dy, 0.);
@@ -377,6 +437,7 @@ int main(int argc, char **argv) {
         SET(&h_interp, i, j, interpolate_data(&h, i * param.dx, j * param.dy));
 
     puts("HELLO WORLD!4");
+    MPI_Barrier(MPI_COMM_WORLD);
     double *send_left = neighbors[LEFT] != MPI_PROC_NULL ? malloc(ny * sizeof * send_left) : NULL; // TODO check malloc non null
     double *recv_left = neighbors[LEFT] != MPI_PROC_NULL ? malloc(ny * sizeof * recv_left) : NULL;
     double *send_right = neighbors[RIGHT] != MPI_PROC_NULL ? malloc(ny * sizeof * send_right) : NULL;
@@ -471,7 +532,7 @@ int main(int argc, char **argv) {
     const double time = GET_TIME() - start;
     printf("\nDone: %g seconds (%g MUpdates/s)\n", time, 1e-6 * (double)eta.nx * (double)eta.ny * (double)nt / time);
 
-    MPI_Type_free(&resizedtype);
+    MPI_Type_free(&subarrtype);
     free_data(&h_interp);
     free_data(&eta);
     free_data(&u);
