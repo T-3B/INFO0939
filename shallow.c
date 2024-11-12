@@ -1,4 +1,5 @@
 #include <libgen.h>
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -242,25 +243,35 @@ static void free_data(struct data *const data) {
   free(data->values);
 }
 
-static double interpolate_data(const struct data *const data, const double x, const double y) {
-  // TODO could store GET values between calls (multiple points could be in the same small square v00 v01 v10 v11)
-  int i = (int) (x / data->dx), i2;
-  int j = (int) (y / data->dy), j2;
-  
-  if (i < 0) i = i2 = 0;
-  else if (i >= data->nx - 1) i = i2 = data->nx - 2;
-  else i2 = i + 1;
-  if (j < 0) j = j2 = 0;
-  else if (j >= data->ny - 1) j = j2 = data->ny - 2;
-  else j2 = j + 1;
+static void interpolate_data1(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
+  int i_old = INT_MIN;
+  double v00, v01, v10, v11;
+  #pragma omp parallel for private(v00, v01, v10, v11) firstprivate(i_old) collapse(2)
+  for (int jj = 0; jj < ny; jj++) {
+    for (int ii = 0; ii < nx; ii++) {
+      const double y = jj * dy;
+      int j = (int) (y / data->dy), j2;
+      const double x = ii * dx;
+      int i = (int) (x / data->dx), i2;
+      if (i != i_old) {
+        if (i < 0) i = i2 = 0;
+        else if (i >= data->nx - 1) i = i2 = data->nx - 2;
+        else i2 = i + 1;
+        if (j < 0) j = j2 = 0;
+        else if (j >= data->ny - 1) j = j2 = data->ny - 2;
+        else j2 = j + 1;
 
-  const double v00 = GET(data, i, j);
-  const double v10 = GET(data, i2, j);
-  const double v01 = GET(data, i, j2);
-  const double v11 = GET(data, i2, j2);
-  const double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
-  const double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
-  return v0 + ((y - j * data->dy) / data->dy) * (v1 - v0);
+        v00 = GET(data, i, j);
+        v10 = GET(data, i2, j);
+        v01 = GET(data, i, j2);
+        v11 = GET(data, i2, j2);
+        i_old = i;
+      }
+      const double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
+      const double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
+      SET(interp, ii, jj, v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
+    }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -304,12 +315,8 @@ int main(int argc, char **argv) {
 
   // interpolate bathymetry
   struct data h_interp;
-  init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-
-  #pragma omp parallel for collapse(2)
-  for (int j = 0; j < ny; j++)
-    for (int i = 0; i < nx; i++)
-      SET(&h_interp, i, j, interpolate_data(&h, i * param.dx, j * param.dy));
+  init_data(&h_interp, nx + 1, ny + 1, param.dx, param.dy, 0.);
+  interpolate_data1(&h_interp, &h, nx + 1, ny + 1, param.dx, param.dy);
 
   const double start = GET_TIME();
   for (int n = 0; n < nt; n++) {
@@ -361,8 +368,8 @@ int main(int argc, char **argv) {
         double u_ij = GET(&u, i, j);
         double v_ij = GET(&v, i, j);
         const double eta_ij = GET(&eta, i, j) - param.dt * (
-          (GET(&h_interp, i >= nx - 1 ? i : i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
-          + (GET(&h_interp, i, j >= ny - 1 ? j : j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
+          (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
+          + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
         SET(&eta, i, j, eta_ij);
 
         // update u and v
