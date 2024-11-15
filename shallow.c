@@ -38,10 +38,8 @@
 #endif
 
 struct parameters {
-  double dx, dy, dt, max_t;
-  double g, gamma;
-  int source_type;
-  int sampling_rate;
+  double dx, dy, dt, max_t, g, gamma;
+  int source_type, sampling_rate;
   char input_h_filename[256];
   char output_eta_filename[256];
   char output_u_filename[256];
@@ -243,7 +241,7 @@ static void free_data(struct data *const data) {
   free(data->values);
 }
 
-static void interpolate_data1(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
+static void interpolate_data(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
   int i_old = INT_MIN;
   double v00, v01, v10, v11;
   #pragma omp parallel for private(v00, v01, v10, v11) firstprivate(i_old) collapse(2)
@@ -316,7 +314,7 @@ int main(int argc, char **argv) {
   // interpolate bathymetry
   struct data h_interp;
   init_data(&h_interp, nx + 1, ny + 1, param.dx, param.dy, 0.);
-  interpolate_data1(&h_interp, &h, nx + 1, ny + 1, param.dx, param.dy);
+  interpolate_data(&h_interp, &h, nx + 1, ny + 1, param.dx, param.dy);
 
   const double start = GET_TIME();
   for (int n = 0; n < nt; n++) {
