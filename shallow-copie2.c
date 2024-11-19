@@ -13,6 +13,8 @@
 // TODO could use a subarray type MPI for last submatrices on the right of the global matrix, so no padx (pady does not change perf, only take a little bit of space)
 // in fact have to!!!! imagine 9x9 matrix, dims[0]==4 => rn all ranks on the last columns will get 3x12 matrix full of padding (no actual data)
 
+// TODO checkMPISuccess to all MPI calls
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -304,6 +306,11 @@ int main(int argc, char **argv) {
   checkMPISuccess(MPI_Cart_shift(cart_comm, 0, 1, &neighbors[LEFT], &neighbors[RIGHT]));
   const _Bool has_left_neighbor = neighbors[LEFT] != MPI_PROC_NULL, has_right_neighbor = neighbors[RIGHT] != MPI_PROC_NULL, has_down_neighbor = neighbors[DOWN] != MPI_PROC_NULL, has_up_neighbor = neighbors[UP] != MPI_PROC_NULL;
 
+  printf("Rank = %4d - Coords = (%3d, %3d)"
+         " - Neighbors (up, down, left, right) = (%3d, %3d, %3d, %3d)\n",
+            global_rank, coords[0], coords[1], 
+            neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
+            
   struct parameters param;
   struct data h;
   if (!global_rank) {
@@ -354,8 +361,8 @@ int main(int argc, char **argv) {
   const int ny = max(1, floor(hy / param.dy));
   const int nt = floor(param.max_t / param.dt);
 
-  struct data eta_global = {(nx + 1) * dims[0], (ny + 1) * dims[1], param.dx, param.dy};
-  if (!global_rank) eta_global.values = malloc((nx + 1) * (ny + 1) * global_size * sizeof *eta_global.values);
+  struct data eta_global = {nx * dims[0], ny * dims[1], param.dx, param.dy};
+  if (!global_rank) eta_global.values = malloc(nx * ny * global_size * sizeof *eta_global.values);
   if (!global_rank) {
     for (int i=0, disp=0; i<dims[0]; i++, disp+=(nx-1)*dims[1])
       for (int j=0; j<dims[1]; j++, disp++)
@@ -378,14 +385,14 @@ int main(int argc, char **argv) {
   MPI_Type_commit(&local_eta_type);
 
   MPI_Datatype eta_subarrtype;
-  MPI_Type_create_subarray(2, (int[]) {(nx + 1) * dims[0], (ny + 1) * dims[1]}, (int[]) {nx + 1, ny + 1}, (int[]) {0, 0}, MPI_ORDER_C, MPI_DOUBLE, &eta_subarrtype);
-  MPI_Type_create_resized(eta_subarrtype, 0, (nx + 1) * dims[0] * sizeof *eta.values, &eta_subarrtype);
+  MPI_Type_create_subarray(2, (int[]) {nx * dims[0], ny * dims[1]}, (int[]) {nx, ny}, (int[]) {0, 0}, MPI_ORDER_C, MPI_DOUBLE, &eta_subarrtype);
+  MPI_Type_create_resized(eta_subarrtype, 0, nx * dims[0] * sizeof *eta.values, &eta_subarrtype);
   MPI_Type_commit(&eta_subarrtype);
   if (!global_rank) {
     int sssize, bsjakssize;
     MPI_Type_size(eta_subarrtype, &sssize);
     MPI_Type_size(subarrtype, &bsjakssize);
-    printf("sizes %d %d\n", sssize, bsjakssize);
+    printf("sizes %d %d %d\n", sssize, bsjakssize, displs[1]);
   }
 
   // interpolate bathymetry
@@ -410,7 +417,12 @@ int main(int argc, char **argv) {
 
     // output solution
     if (param.sampling_rate && !(n % param.sampling_rate)) {
-      MPI_Gatherv(eta.values, (nx + 1) * (ny + 1), MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_subarrtype, 0, MPI_COMM_WORLD);
+      struct data blabla;
+      init_data(&blabla, nx, ny, param.dx, param.dy, 0.);
+      for (int i = 1; i < nx + 1; i++)
+        for (int j = 1; j < ny + 1; j++)
+          SET(&blabla, i - 1, j - 1, GET(&eta, i, j));
+      MPI_Gatherv(blabla.values, nx * ny, MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_subarrtype, 0, MPI_COMM_WORLD);
 
       if (!global_rank) {
         write_data_vtk(&eta_global, "water elevation", "example_inputs/simple/output/eta_simple", n);
