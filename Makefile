@@ -5,6 +5,7 @@ LDLIBS	= -lm
 MPICC	= mpicc -DUSE_MPI
 OMP		= -fopenmp
 SRC		= shallow.c
+MPISRC	= shallow_mpi.c
 TARGET	= shallow
 
 export OMPI_CC
@@ -12,11 +13,11 @@ export OMPI_CC
 all: omp_mpi mpi omp serial
 
 omp_mpi: $(TARGET)
-$(TARGET): $(SRC)
+$(TARGET): $(MPISRC)
 	$(MPICC) $(CFLAGS) $(OMP) -o $@ $^ $(LDLIBS)
 
 mpi: $(TARGET)_mpi
-$(TARGET)_mpi: $(SRC)
+$(TARGET)_mpi: $(MPISRC)
 	$(MPICC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 omp: $(TARGET)_omp
