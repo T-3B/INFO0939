@@ -55,6 +55,7 @@ struct data {
 #define GET(data, i, j) ((data)->values[(data)->nx * (j) + (i)])
 #define SET(data, i, j, val) ((data)->values[(data)->nx * (j) + (i)] = (val))
 
+
 static inline int max(const int a, const int b) { return a > b ? a : b;}
 
 static int read_parameters(struct parameters *restrict const param, const char *restrict const filename) {
@@ -321,76 +322,73 @@ int main(int argc, char **argv)
   const double start = GET_TIME();
 
   // Map 3 arrays for u, v and eta on the CPU and GPU for faster transfer
-  // dimension of these arrays should be correct even though 
-
   #pragma omp target data map(tofrom: eta.values[0:nx*ny], \
                                u.values[0:(nx+1)*ny],       \
                                v.values[0:nx*(ny+1)],       \
                                h_interp.values[0:nx*ny])
-    for (int n = 0; n < nt; n++) {
-      if (n && (n % (nt / 10)) == 0) {
-        const double time_sofar = GET_TIME() - start;
-        const double eta = (nt - n) * time_sofar / n;
-        printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
-        fflush(stdout);
-      }
-
-      // Output solution
-      if (param.sampling_rate && !(n % param.sampling_rate)) {
-        write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-      }
-
-      
-      const double t = n * param.dt;
-      if (param.source_type == 1) {
-        const double A = 5;
-        const double f = 1. / 20.;
-
-        // Not sure if this is usefull
-        #pragma omp target teams distribute parallel for
-        for (int i = 0; i < ny; i++) {
-          SET(&u, 0, i, 0.0);
-          SET(&u, nx, i, 0.0);
-        }
-        // Same not sure if this is good
-        #pragma omp target teams distribute parallel for
-        for (int i = 0; i < nx; i++) {
-          SET(&v, i, 0, 0.0);
-          SET(&v, i, ny, A * sin(2 * M_PI * f * t));
-        }
-      } else if (param.source_type == 2) {
-        const double A = 5;
-        const double f = 1. / 20.;
-        SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
-      } else {
-        printf("Error: Unknown source type %d\n", param.source_type);
-        return 1;
-      }
-    // Same as CPU OpenMp but using teams to distribute the computation i reuse collaspe but maybe it is not useful.
-    #pragma omp target teams distribute parallel for collapse(2)
-      for (int j = 0; j < ny; j++) {  // CHANGED (question 4)
-        for (int i = 0; i < nx; i++) {
-            // update eta
-            const double h_ij = GET(&h_interp, i, j);
-            double u_ij = GET(&u, i, j);
-            double v_ij = GET(&v, i, j);
-            const double eta_ij = GET(&eta, i, j) - param.dt * (
-            (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
-            + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
-            SET(&eta, i, j, eta_ij);
-
-            // update u and v
-            const double c1 = param.dt * param.g;
-            const double c2 = param.dt * param.gamma;
-            const double eta_imj = i ? GET(&eta, i - 1, j) : eta_ij;
-            const double eta_ijm = j ? GET(&eta, i, j - 1) : eta_ij;
-            u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
-            v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
-            SET(&u, i, j, u_ij);
-            SET(&v, i, j, v_ij);
-        }
+  for (int n = 0; n < nt; n++) {
+    if (n && (n % (nt / 10)) == 0) {
+      const double time_sofar = GET_TIME() - start;
+      const double eta = (nt - n) * time_sofar / n;
+      printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
+      fflush(stdout);
     }
-    
+
+    // Output solution
+    if (param.sampling_rate && !(n % param.sampling_rate)) {
+      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
+    }
+
+    const double t = n * param.dt;
+    if (param.source_type == 1) {
+      const double A = 5;
+      const double f = 1. / 20.;
+
+      // Set boundary conditions for u and v
+      #pragma omp target teams distribute parallel for
+      for (int i = 0; i < ny; i++) {
+        SET(&u, 0, i, 0.0);
+        SET(&u, nx, i, 0.0);
+      }
+
+      #pragma omp target teams distribute parallel for
+      for (int i = 0; i < nx; i++) {
+        SET(&v, i, 0, 0.0);
+        SET(&v, i, ny, A * sin(2 * M_PI * f * t));
+      }
+    } else if (param.source_type == 2) {
+      const double A = 5;
+      const double f = 1. / 20.;
+      SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
+    } else {
+      printf("Error: Unknown source type %d\n", param.source_type);
+      return 1;
+    }
+
+    // Update eta, u, and v using OpenMP target teams
+    #pragma omp target teams distribute parallel for collapse(2)
+    for (int j = 0; j < ny; j++) {
+      for (int i = 0; i < nx; i++) {
+        // update eta
+        const double h_ij = GET(&h_interp, i, j);
+        double u_ij = GET(&u, i, j);
+        double v_ij = GET(&v, i, j);
+        const double eta_ij = GET(&eta, i, j) - param.dt * (
+          (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
+          + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
+        SET(&eta, i, j, eta_ij);
+
+        // update u and v
+        const double c1 = param.dt * param.g;
+        const double c2 = param.dt * param.gamma;
+        const double eta_imj = i ? GET(&eta, i - 1, j) : eta_ij;
+        const double eta_ijm = j ? GET(&eta, i, j - 1) : eta_ij;
+        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
+        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+        SET(&u, i, j, u_ij);
+        SET(&v, i, j, v_ij);
+      }
+    }
   }
 
   write_manifest_vtk(param.output_eta_filename, param.dt, nt, param.sampling_rate);
@@ -406,3 +404,5 @@ int main(int argc, char **argv)
 
   return 0;
 }
+
+
