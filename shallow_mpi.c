@@ -257,20 +257,19 @@ static void free_data(struct data *const data) {
 static void interpolate_data(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
   int i_old = INT_MIN;
   double v00, v01, v10, v11;
-  #pragma omp parallel for private(v00, v01, v10, v11) firstprivate(i_old) collapse(2)
+  #pragma omp parallel for private(v00, v01, v10, v11) firstprivate(i_old)
   for (int jj = 0; jj < ny; jj++) {
+    const double y = jj * dy;
+    int j = (int) (y / data->dy), j2;
+    if (j >= data->ny - 1) j = j2 = data->ny - 2;
+    else j2 = j + 1;
+
     for (int ii = 0; ii < nx; ii++) {
-      const double y = jj * dy;
-      int j = (int) (y / data->dy), j2;
       const double x = ii * dx;
       int i = (int) (x / data->dx), i2;
       if (i != i_old) {
-        if (i < 0) i = i2 = 0;
-        else if (i >= data->nx - 1) i = i2 = data->nx - 2;
+        if (i >= data->nx - 1) i = i2 = data->nx - 2;
         else i2 = i + 1;
-        if (j < 0) j = j2 = 0;
-        else if (j >= data->ny - 1) j = j2 = data->ny - 2;
-        else j2 = j + 1;
 
         v00 = GET(data, i, j);
         v10 = GET(data, i2, j);
@@ -293,52 +292,46 @@ int main(int argc, char **argv) {
     ABORT();
   }
 
-  int global_rank, global_size, cart_rank, cart_size, coords[2], neighbors[4], dims[2] = {}, periods[2] = {};
+  int rank, global_size, cart_size, coords[2], neighbors[4], dims[2] = {}, periods[2] = {};
   MPI_Comm cart_comm;
   checkMPISuccess(MPI_Comm_size(MPI_COMM_WORLD, &global_size));
-  checkMPISuccess(MPI_Comm_rank(MPI_COMM_WORLD, &global_rank));
+  checkMPISuccess(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
   checkMPISuccess(MPI_Dims_create(global_size, 2, dims));
   checkMPISuccess(MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1, &cart_comm));
   checkMPISuccess(MPI_Comm_size(cart_comm, &cart_size));
-  checkMPISuccess(MPI_Comm_rank(cart_comm, &cart_rank));
-  checkMPISuccess(MPI_Cart_coords(cart_comm, cart_rank, 2, coords));
+  checkMPISuccess(MPI_Comm_rank(cart_comm, &rank));
+  checkMPISuccess(MPI_Cart_coords(cart_comm, rank, 2, coords));
   checkMPISuccess(MPI_Cart_shift(cart_comm, 1, 1, &neighbors[UP], &neighbors[DOWN]));
   checkMPISuccess(MPI_Cart_shift(cart_comm, 0, 1, &neighbors[LEFT], &neighbors[RIGHT]));
-  const _Bool has_left_neighbor = neighbors[LEFT] != MPI_PROC_NULL, has_right_neighbor = neighbors[RIGHT] != MPI_PROC_NULL, has_down_neighbor = neighbors[DOWN] != MPI_PROC_NULL, has_up_neighbor = neighbors[UP] != MPI_PROC_NULL;
+  const _Bool has_left_neighbor = neighbors[LEFT] != MPI_PROC_NULL,
+              has_right_neighbor = neighbors[RIGHT] != MPI_PROC_NULL,
+              has_down_neighbor = neighbors[DOWN] != MPI_PROC_NULL,
+              has_up_neighbor = neighbors[UP] != MPI_PROC_NULL;
 
-  printf("Rank = %4d - Coords = (%3d, %3d)"
-         " - Neighbors (up, down, left, right) = (%3d, %3d, %3d, %3d)\n",
-            global_rank, coords[0], coords[1], 
-            neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
-            
   struct parameters param;
   struct data h;
-  if (!global_rank) {
+  if (!rank) {
     if (unlikely(read_parameters(&param, argv[1]))) ABORT();
     print_parameters(&param);
     if (unlikely(read_data(&h, param.input_h_filename, dims))) ABORT();
   }
-  MPI_Bcast(&param, 6, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&param.source_type, 2, MPI_INT, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&h, 2, MPI_INT, 0, MPI_COMM_WORLD);
-  MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  checkMPISuccess(MPI_Bcast(&param, 6, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&param.source_type, 2, MPI_INT, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&h, 2, MPI_INT, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, MPI_COMM_WORLD));
 
   // gridsize will include padding and be perfectly dividable into dims ranks
-  int tmp_mod;
-  const int gridsizex = (tmp_mod = h.nx % dims[0]) ? h.nx + dims[0] - tmp_mod : h.nx;
-  const int gridsizey = (tmp_mod = h.ny % dims[1]) ? h.ny + dims[1] - tmp_mod : h.ny;
-
-  int sizes[2]    = {gridsizex, gridsizey};
-  int subsizes[2] = {gridsizex/dims[0], gridsizey/dims[1]};
-  int starts[2]   = {};
-  MPI_Datatype subarrtype;
-  MPI_Type_create_subarray(2, sizes, subsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &subarrtype);
-  MPI_Type_create_resized(subarrtype, 0, subsizes[0] * sizeof *h.values, &subarrtype);
-  MPI_Type_commit(&subarrtype);
-
-  int sendcounts[global_size];  // TODO malloc
-  int displs[global_size];
-  if (!global_rank) {
+  int tmp_mod, *sendcounts, *displs;
+  const int gridsizex = (tmp_mod = h.nx % dims[0]) ? h.nx + dims[0] - tmp_mod : h.nx,
+            gridsizey = (tmp_mod = h.ny % dims[1]) ? h.ny + dims[1] - tmp_mod : h.ny,
+            subsizes[2] = {gridsizex/dims[0], gridsizey/dims[1]};
+  MPI_Datatype h_subdomain;
+  checkMPISuccess(MPI_Type_vector(subsizes[1], subsizes[0], gridsizex, MPI_DOUBLE, &h_subdomain));
+  checkMPISuccess(MPI_Type_create_resized(h_subdomain, 0, sizeof *h.values, &h_subdomain));
+  checkMPISuccess(MPI_Type_commit(&h_subdomain));
+  if (!rank) {
+    if (!(sendcounts = malloc(global_size * 2 * sizeof *sendcounts))) ABORT();
+    displs = sendcounts + global_size;
     for (int i=0, disp=0; i<dims[0]; i++, disp+=(subsizes[0]-1)*dims[1]) {
       for (int j=0; j<dims[1]; j++, disp++) {
         const int idx = i * dims[1] + j;
@@ -348,9 +341,9 @@ int main(int argc, char **argv) {
     }
   }
 
-  double *const values = malloc(subsizes[0] * subsizes[1] * sizeof *h.values);
+  double *const values = malloc(subsizes[0] * subsizes[1] * sizeof *values);
   // TODO see to do it in place for rank == 0 (https://stackoverflow.com/questions/29415663/how-does-mpi-in-place-work-with-mpi-scatter)
-  MPI_Scatterv(h.values, sendcounts, displs, subarrtype, values, subsizes[0] * subsizes[1], MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  checkMPISuccess(MPI_Scatterv(h.values, sendcounts, displs, h_subdomain, values, subsizes[0] * subsizes[1], MPI_DOUBLE, 0, MPI_COMM_WORLD));
   h.values = values;
   h.nx = has_right_neighbor || h.nx == dims[0] * subsizes[0] ? subsizes[0] : h.nx % subsizes[0];
   h.ny = has_down_neighbor || h.ny == dims[1] * subsizes[1] ? subsizes[1] : h.ny % subsizes[1];
@@ -361,54 +354,61 @@ int main(int argc, char **argv) {
   const int ny = max(1, floor(hy / param.dy));
   const int nt = floor(param.max_t / param.dt);
 
+  /* Does not work, for the Gatherv
   struct data eta_global = {nx * dims[0], ny * dims[1], param.dx, param.dy};
-  if (!global_rank) eta_global.values = malloc(nx * ny * global_size * sizeof *eta_global.values);
-  if (!global_rank) {
+  if (!rank) eta_global.values = malloc(nx * ny * global_size * sizeof *eta_global.values);
+  if (!rank) {
     for (int i=0, disp=0; i<dims[0]; i++, disp+=(nx-1)*dims[1])
       for (int j=0; j<dims[1]; j++, disp++)
         displs[i * dims[1] + j] = disp;
   }
+  MPI_Datatype eta_h_subdomain;
+  checkMPISuccess(MPI_Type_create_subarray(2, (int[]) {nx * dims[0], ny * dims[1]}, (int[]) {nx, ny}, (int[]) {0, 0}, MPI_ORDER_C, MPI_DOUBLE, &eta_h_subdomain));
+  checkMPISuccess(MPI_Type_create_resized(eta_h_subdomain, 0, nx * dims[0] * sizeof *eta.values, &eta_h_subdomain));
+  checkMPISuccess(MPI_Type_commit(&eta_h_subdomain)); */
 
-  if (!global_rank) {
-    printf(" - %dx%d divided into %dx%d subdomains each of grid size: %g m x %g m (%d x %d = %d grid points)\n", eta_global.nx, eta_global.ny, dims[0], dims[1], hx, hy, nx, ny, nx * ny);
+  if (!rank) {
+    printf(" - %dx%d divided into %dx%d subdomains each of grid size: %g m x %g m (%d x %d = %d grid points)\n", nx * dims[0], ny * dims[1], dims[0], dims[1], hx, hy, nx, ny, nx * ny);
     printf(" - number of time steps: %d\n", nt);
   }
 
   struct data eta, u, v;
-  init_data(&eta, nx + 1, ny + 1, param.dx, param.dy, 0.);  // GET(&eta, 0, ny) and GET(&eta, nx, 0) will be the receiving ghost cells; GET(&eta,0,0) will never be used
+  init_data(&eta, nx + 1, ny + 1, param.dx, param.dy, 0.);  // GET(&eta, 0, j) and GET(&eta, i, 0) will be the receiving ghost cells; GET(&eta,0,0) will never be used
   init_data(&u, nx + 1, ny, param.dx, param.dy, 0.);  // GET(&u, nx, j) will be the receiving ghost cells
   init_data(&v, nx, ny + 1, param.dx, param.dy, 0.);  // GET(&v, i, ny) will be the receiving ghost cells
 
-  MPI_Datatype local_eta_type;
-  MPI_Type_create_subarray(2, (int[]) {nx + 1, ny + 1}, (int[]) {nx, ny}, (int[]) {1, 1}, MPI_ORDER_C, MPI_DOUBLE, &local_eta_type);
-  //MPI_Type_create_resized(local_eta_type, 0, nx * sizeof *eta.values, &local_eta_type);
-  MPI_Type_commit(&local_eta_type);
-
-  MPI_Datatype eta_subarrtype;
-  MPI_Type_create_subarray(2, (int[]) {nx * dims[0], ny * dims[1]}, (int[]) {nx, ny}, (int[]) {0, 0}, MPI_ORDER_C, MPI_DOUBLE, &eta_subarrtype);
-  MPI_Type_create_resized(eta_subarrtype, 0, nx * dims[0] * sizeof *eta.values, &eta_subarrtype);
-  MPI_Type_commit(&eta_subarrtype);
-  if (!global_rank) {
-    int sssize, bsjakssize;
-    MPI_Type_size(eta_subarrtype, &sssize);
-    MPI_Type_size(subarrtype, &bsjakssize);
-    printf("sizes %d %d %d\n", sssize, bsjakssize, displs[1]);
-  }
+  MPI_Datatype vertical_ghost_cells;  // for ghost cells: u_send_to_left, eta_send_to_right
+  //MPI_Type_create_subarray(2, (int[]) {nx + 1, ny}, (int[]) {1, ny}, (int[]) {0, 0}, MPI_ORDER_C, MPI_DOUBLE, &vertical_ghost_cells);
+  checkMPISuccess(MPI_Type_vector(ny, 1, nx + 1, MPI_DOUBLE, &vertical_ghost_cells));
+  checkMPISuccess(MPI_Type_create_resized(vertical_ghost_cells, 0, (nx + 1) * sizeof *eta.values, &vertical_ghost_cells));
+  checkMPISuccess(MPI_Type_commit(&vertical_ghost_cells));
 
   // interpolate bathymetry
   struct data h_interp;
   init_data(&h_interp, nx + 1, ny + 1, param.dx, param.dy, 0.);
   interpolate_data(&h_interp, &h, nx + 1, ny + 1, param.dx, param.dy);
+  
+  //double *u_send_to_left = has_left_neighbor ? malloc(ny * sizeof *u_send_to_left) : NULL; // TODO check malloc non null
+  //double *u_recv_from_right = has_right_neighbor ? malloc(ny * sizeof *u_recv_from_right) : NULL;
+  //double *eta_recv_from_left = has_left_neighbor ? malloc(ny * sizeof *eta_recv_from_left) : NULL;
+  //double *eta_send_to_right = has_right_neighbor ? malloc(ny * sizeof *eta_send_to_right) : NULL;
 
-  double *u_send_to_left = has_left_neighbor ? malloc(ny * sizeof *u_send_to_left) : NULL; // TODO check malloc non null
-  double *u_recv_from_right = has_right_neighbor ? malloc(ny * sizeof *u_recv_from_right) : NULL;
-  double *eta_recv_from_left = has_left_neighbor ? malloc(ny * sizeof *eta_recv_from_left) : NULL;
-  double *eta_send_to_right = has_right_neighbor ? malloc(ny * sizeof *eta_send_to_right) : NULL;
+  //if (!rank || 1) {
+    //long a = rank * (nx + 1) * (ny + 1) + 1;
+    //for (int jj = 0; jj <= ny; jj++) {
+      //for (int ii = 0; ii <= nx; ii++) {
+        //SET(&eta, ii, jj, (double) a);
+        ////printf("%d, %d: %g\n", ii, jj, (double) a);
+        //a++;
+      //}
+    //}
+    //printf("was set %d, %d: %g\n", 400, 0, GET(&u, 400, 0));
+  //}
 
   const double start = GET_TIME();
   for (int n = 0; n < nt; n++) {
 
-    if (!global_rank && n && (n % (nt / 10)) == 0) {
+    if (!rank && n && (n % (nt / 10)) == 0) {
       const double time_sofar = GET_TIME() - start;
       const double time_eta = (nt - n) * time_sofar / n;
       printf("Computing step %d/%d (ETA: %g seconds)\n", n, nt, time_eta);
@@ -416,40 +416,60 @@ int main(int argc, char **argv) {
     }
 
     // output solution
-    if (param.sampling_rate && !(n % param.sampling_rate)) {
+    if (param.sampling_rate && n && !(n % param.sampling_rate)) {
       struct data blabla;
       init_data(&blabla, nx, ny, param.dx, param.dy, 0.);
       for (int i = 1; i < nx + 1; i++)
         for (int j = 1; j < ny + 1; j++)
           SET(&blabla, i - 1, j - 1, GET(&eta, i, j));
-      MPI_Gatherv(blabla.values, nx * ny, MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_subarrtype, 0, MPI_COMM_WORLD);
+      //MPI_Gatherv(blabla.values, nx * ny, MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_h_subdomain, 0, MPI_COMM_WORLD);
 
-      if (!global_rank) {
-        write_data_vtk(&eta_global, "water elevation", "example_inputs/simple/output/eta_simple", n);
-        //write_data(&eta, "example_inputs/simple/output/global_eta_simple", n);
+      if (rank) {
+        write_data_vtk(&blabla, "water elevation", "example_inputs/simple/output/eta_simple", n);
         //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
         //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
       }
     }
     
     // Prepare boundary data for exchange
-    for (int j = 0; j < ny; j++) {
-        if (has_left_neighbor) u_send_to_left[j] = GET(&u, 0, j);
-        if (has_right_neighbor) eta_send_to_right[j] = GET(&eta, nx, j + 1);
-    }
-    MPI_Sendrecv(u_send_to_left, has_left_neighbor * ny, MPI_DOUBLE, neighbors[LEFT], 0, 
-                u_recv_from_right, has_right_neighbor * ny, MPI_DOUBLE, neighbors[RIGHT], 0, cart_comm, MPI_STATUS_IGNORE);  // TODO could be possible to send with a custom type MPI_Type_create_subarray with width=1
-    MPI_Sendrecv(eta_send_to_right, has_right_neighbor * ny, MPI_DOUBLE, neighbors[RIGHT], 0,
-                eta_recv_from_left, has_left_neighbor * ny, MPI_DOUBLE, neighbors[LEFT], 0, cart_comm, MPI_STATUS_IGNORE);
-    MPI_Sendrecv(v.values, has_down_neighbor * nx, MPI_DOUBLE, neighbors[DOWN], 0,
-                v.values + nx * ny, has_up_neighbor * nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, MPI_STATUS_IGNORE);
-    MPI_Sendrecv(eta.values + (nx + 1) * ny + 1, has_up_neighbor * nx, MPI_DOUBLE, neighbors[UP], 0,
-                eta.values + 1, has_down_neighbor * nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, MPI_STATUS_IGNORE);
-    // Place received boundary data into ghost cells
-    for (int j = 0; j < ny; j++) {
-        if (has_left_neighbor) SET(&eta, 0, j + 1, eta_recv_from_left[j]);
-        if (has_right_neighbor) SET(&u, nx, j, u_recv_from_right[j]);
-    }
+    //for (int j = 0; j < ny; j++) {
+        ////if (has_left_neighbor) u_send_to_left[j] = GET(&u, 0, j);
+        //if (has_right_neighbor) eta_send_to_right[j] = GET(&eta, nx, j + 1);
+    //}
+    //MPI_Sendrecv(u_send_to_left, has_left_neighbor * ny, MPI_DOUBLE, neighbors[LEFT], 0,
+                //u_recv_from_right, has_right_neighbor * ny, MPI_DOUBLE, neighbors[RIGHT], 0, cart_comm, MPI_STATUS_IGNORE);
+    checkMPISuccess(MPI_Sendrecv(&GET(&u, 0, 0), has_left_neighbor, vertical_ghost_cells, neighbors[LEFT], 0,
+                                 &GET(&u, nx, 0), has_right_neighbor, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, MPI_STATUS_IGNORE));
+    //MPI_Sendrecv(eta_send_to_right, has_right_neighbor * ny, MPI_DOUBLE, neighbors[RIGHT], 0,
+                //eta_recv_from_left, has_left_neighbor * ny, MPI_DOUBLE, neighbors[LEFT], 0, cart_comm, MPI_STATUS_IGNORE);
+    checkMPISuccess(MPI_Sendrecv(&GET(&eta, nx, 1), has_right_neighbor, vertical_ghost_cells, neighbors[RIGHT], 0,
+                                 &GET(&eta, 0, 1), has_left_neighbor, vertical_ghost_cells, neighbors[LEFT], 0, cart_comm, MPI_STATUS_IGNORE));
+    checkMPISuccess(MPI_Sendrecv(&GET(&v, 0, 0), has_down_neighbor * nx, MPI_DOUBLE, neighbors[DOWN], 0,
+                                 &GET(&v, 0, ny), has_up_neighbor * nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, MPI_STATUS_IGNORE));
+    checkMPISuccess(MPI_Sendrecv(&GET(&eta, 1, ny + 1), has_up_neighbor * nx, MPI_DOUBLE, neighbors[UP], 0,
+                                 &GET(&eta, 1, 0), has_down_neighbor * nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, MPI_STATUS_IGNORE));
+
+
+    //if (rank) {
+      //long a = 1;
+      //for (int jj = 0; jj <= ny; jj++) {
+        //for (int ii = 0; ii <= nx; ii++, a++) {
+          //double b = GET(&eta, ii, jj);
+          //if (a != b) printf("%d, %d: %g\n", ii, jj, b);
+        //}
+      //}
+    //}
+    //MPI_Barrier(MPI_COMM_WORLD);
+    //ABORT();
+
+    //// Place received boundary data into ghost cells
+    //for (int j = 0; j < ny; j++) {
+        //if (has_left_neighbor) {
+          //if (GET(&eta, 0, j + 1) != eta_recv_from_left[j])
+            //printf("AZERTYUIOPQSDFGHJKL %g %g\n", GET(&eta, 0, j + 1), eta_recv_from_left[j]);
+          //SET(&eta, 0, j + 1, eta_recv_from_left[j]);
+        //}
+    //}
 
     // impose boundary conditions
     const double t = n * param.dt;
@@ -476,7 +496,7 @@ int main(int argc, char **argv) {
       ABORT();
     }
 
-    #pragma omp parallel for collapse(2)
+    #pragma omp parallel for
     for (int j = 0; j < ny; j++) {  // CHANGED (question 4)
       for (int i = 0; i < nx; i++) {
         // update eta
@@ -500,16 +520,16 @@ int main(int argc, char **argv) {
       }
     }
   }
-  // TODO change global_rank to cart_rank (ranks may have been reordered)
-  if (!global_rank) {
+  if (!rank) {
     write_manifest_vtk(param.output_eta_filename, param.dt, nt, param.sampling_rate);
     const double time = GET_TIME() - start;
     printf("Done: %g seconds (%g MUpdates/s)\n", time, 1e-6 * (double)eta.nx * (double)eta.ny * (double)nt / time);
+    free(sendcounts);
   }
 
-  MPI_Type_free(&eta_subarrtype);
-  MPI_Type_free(&local_eta_type);
-  MPI_Type_free(&subarrtype);
+  checkMPISuccess(MPI_Type_free(&vertical_ghost_cells));
+  //checkMPISuccess(MPI_Type_free(&eta_h_subdomain));
+  checkMPISuccess(MPI_Type_free(&h_subdomain));
   free_data(&h_interp);
   free_data(&eta);
   free_data(&u);
