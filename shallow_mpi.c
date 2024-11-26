@@ -13,8 +13,6 @@
 // TODO could use a subarray type MPI for last submatrices on the right of the global matrix, so no padx (pady does not change perf, only take a little bit of space)
 // in fact have to!!!! imagine 9x9 matrix, dims[0]==4 => rn all ranks on the last columns will get 3x12 matrix full of padding (no actual data)
 
-// TODO checkMPISuccess to all MPI calls
-
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -316,10 +314,10 @@ int main(int argc, char **argv) {
     print_parameters(&param);
     if (unlikely(read_data(&h, param.input_h_filename, dims))) ABORT();
   }
-  checkMPISuccess(MPI_Bcast(&param, 6, MPI_DOUBLE, 0, MPI_COMM_WORLD));
-  checkMPISuccess(MPI_Bcast(&param.source_type, 2, MPI_INT, 0, MPI_COMM_WORLD));
-  checkMPISuccess(MPI_Bcast(&h, 2, MPI_INT, 0, MPI_COMM_WORLD));
-  checkMPISuccess(MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&param, 6, MPI_DOUBLE, 0, cart_comm));
+  checkMPISuccess(MPI_Bcast(&param.source_type, 2, MPI_INT, 0, cart_comm));
+  checkMPISuccess(MPI_Bcast(&h, 2, MPI_INT, 0, cart_comm));
+  checkMPISuccess(MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, cart_comm));
 
   // gridsize will include padding and be perfectly dividable into dims ranks
   int tmp_mod, *sendcounts, *displs;
@@ -344,7 +342,7 @@ int main(int argc, char **argv) {
 
   double *const values = malloc(subsizes[0] * subsizes[1] * sizeof *values);
   // TODO see to do it in place for rank == 0 (https://stackoverflow.com/questions/29415663/how-does-mpi-in-place-work-with-mpi-scatter)
-  checkMPISuccess(MPI_Scatterv(h.values, sendcounts, displs, h_subdomain, values, subsizes[0] * subsizes[1], MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Scatterv(h.values, sendcounts, displs, h_subdomain, values, subsizes[0] * subsizes[1], MPI_DOUBLE, 0, cart_comm));
   h.values = values;
   h.nx = has_right_neighbor || h.nx == dims[0] * subsizes[0] ? subsizes[0] : h.nx % subsizes[0];
   h.ny = has_down_neighbor || h.ny == dims[1] * subsizes[1] ? subsizes[1] : h.ny % subsizes[1];
@@ -424,7 +422,7 @@ int main(int argc, char **argv) {
       for (int i = 1; i < nx + 1; i++)
         for (int j = 1; j < ny + 1; j++)
           SET(&blabla, i - 1, j - 1, GET(&eta, i, j));
-      //MPI_Gatherv(blabla.values, nx * ny, MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_h_subdomain, 0, MPI_COMM_WORLD);
+      //MPI_Gatherv(blabla.values, nx * ny, MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_h_subdomain, 0, cart_comm);
       
       write_data_vtk(&blabla, "water elevation", "example_inputs/simple/output/eta_simple", n, nx_offset, ny_offset, rank, blabla.nx * dims[0], blabla.ny * dims[1]);
       //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
@@ -459,7 +457,7 @@ int main(int argc, char **argv) {
         //}
       //}
     //}
-    //MPI_Barrier(MPI_COMM_WORLD);
+    //MPI_Barrier(cart_comm);
     //ABORT();
 
     //// Place received boundary data into ghost cells
