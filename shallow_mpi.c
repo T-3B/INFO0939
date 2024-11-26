@@ -170,12 +170,12 @@ static int write_data(const struct data *restrict const data, const char *restri
   return 0;
 }
 
-static int write_data_vtk(const struct data *restrict const data, const char *restrict const name, const char *restrict const filename, const int step) {
+static int write_data_vtk(const struct data *restrict const data, const char *restrict const name, const char *restrict const filename, const int step, const int nx_offset, const int ny_offset, const int rank, const int global_x, const int global_y) {
   char out[512];
   if (step < 0)
-    sprintf(out, "%s.vti", filename);
+    sprintf(out, "%s_%d.vti", filename, rank);
   else
-    sprintf(out, "%s_%d.vti", filename, step);
+    sprintf(out, "%s_%d_%d.vti", filename, step, rank);
 
   FILE *const fp = fopen(out, "wb");
   if (unlikely(!fp)) {
@@ -188,7 +188,7 @@ static int write_data_vtk(const struct data *restrict const data, const char *re
 
   fprintf(fp, "<?xml version=\"1.0\"?>\n");
   fprintf(fp, "<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\" header_type=\"UInt64\">\n");
-  fprintf(fp, "  <ImageData WholeExtent=\"0 %d 0 %d 0 0\" Spacing=\"%lf %lf 0.0\">\n", data->nx - 1, data->ny - 1, data->dx, data->dy);
+  fprintf(fp, "  <ImageData WholeExtent=\"0 %d 0 %d 0 0\" Origin=\"%g %g 0\" Spacing=\"%g %g 0.0\">\n", data->nx - 1, data->ny - 1, nx_offset * data->dx, ny_offset * data->dy, data->dx, data->dy);
   fprintf(fp, "    <Piece Extent=\"0 %d 0 %d 0 0\">\n", data->nx - 1, data->ny - 1);
 
   fprintf(fp, "      <PointData Scalars=\"scalar_data\">\n");
@@ -211,7 +211,7 @@ static int write_data_vtk(const struct data *restrict const data, const char *re
   return 0;
 }
 
-static int write_manifest_vtk(const char *restrict const filename, const double dt, const int nt, const int sampling_rate) {
+static int write_manifest_vtk(const char *restrict const filename, const double dt, const int nt, const int sampling_rate, const int global_size) {
   char out[512];
   sprintf(out, "%s.pvd", filename);
   const char *const base_filename = basename((char *)filename);
@@ -226,8 +226,9 @@ static int write_manifest_vtk(const char *restrict const filename, const double 
   fprintf(fp, "  <Collection>\n");
   if (sampling_rate)
     for (int n = 0; n < nt; n++)
-      if (!(n % sampling_rate))
-        fprintf(fp, "    <DataSet timestep=\"%g\" file='%s_%d.vti'/>\n", n * dt, base_filename, n);
+      if (!(n % sampling_rate))  // TODO inline this condition in above loop
+        for (int rank = global_size; rank--;)
+          fprintf(fp, "    <DataSet timestep=\"%g\" group=\"\" part=\"%d\" file='%s_%d_%d.vti'/>\n", n * dt, rank, base_filename, n, rank);
 
   fprintf(fp, "  </Collection>\n");
   fprintf(fp, "</VTKFile>\n");
@@ -353,6 +354,7 @@ int main(int argc, char **argv) {
   const int nx = max(1, floor(hx / param.dx));
   const int ny = max(1, floor(hy / param.dy));
   const int nt = floor(param.max_t / param.dt);
+  const int nx_offset = nx * coords[0], ny_offset = ny * coords[1];
 
   /* Does not work, for the Gatherv
   struct data eta_global = {nx * dims[0], ny * dims[1], param.dx, param.dy};
@@ -416,19 +418,17 @@ int main(int argc, char **argv) {
     }
 
     // output solution
-    if (param.sampling_rate && n && !(n % param.sampling_rate)) {
+    if (param.sampling_rate && !(n % param.sampling_rate)) {
       struct data blabla;
       init_data(&blabla, nx, ny, param.dx, param.dy, 0.);
       for (int i = 1; i < nx + 1; i++)
         for (int j = 1; j < ny + 1; j++)
           SET(&blabla, i - 1, j - 1, GET(&eta, i, j));
       //MPI_Gatherv(blabla.values, nx * ny, MPI_DOUBLE, eta_global.values, sendcounts, displs, eta_h_subdomain, 0, MPI_COMM_WORLD);
-
-      if (rank) {
-        write_data_vtk(&blabla, "water elevation", "example_inputs/simple/output/eta_simple", n);
-        //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-        //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
-      }
+      
+      write_data_vtk(&blabla, "water elevation", "example_inputs/simple/output/eta_simple", n, nx_offset, ny_offset, rank, blabla.nx * dims[0], blabla.ny * dims[1]);
+      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
     }
     
     // Prepare boundary data for exchange
@@ -520,8 +520,9 @@ int main(int argc, char **argv) {
       }
     }
   }
+  
   if (!rank) {
-    write_manifest_vtk(param.output_eta_filename, param.dt, nt, param.sampling_rate);
+    write_manifest_vtk(param.output_eta_filename, param.dt, nt, param.sampling_rate, global_size);
     const double time = GET_TIME() - start;
     printf("Done: %g seconds (%g MUpdates/s)\n", time, 1e-6 * (double)eta.nx * (double)eta.ny * (double)nt / time);
     free(sendcounts);
