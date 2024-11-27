@@ -283,6 +283,12 @@ static void interpolate_data(const struct data *const interp, const struct data 
   }
 }
 
+static inline void swap_adjacent(int *ptr) {
+  const int tmp = *ptr;
+  ptr[0] = ptr[1];
+  ptr[1] = tmp;
+}
+
 int main(int argc, char **argv) {
   checkMPISuccess(MPI_Init(&argc, &argv));
 
@@ -296,6 +302,20 @@ int main(int argc, char **argv) {
   checkMPISuccess(MPI_Comm_size(MPI_COMM_WORLD, &global_size));
   checkMPISuccess(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
   checkMPISuccess(MPI_Dims_create(global_size, 2, dims));
+
+  struct parameters param;
+  struct data h;
+  if (!rank) {
+    if (unlikely(read_parameters(&param, argv[1]))) ABORT();
+    print_parameters(&param);
+    if (unlikely(read_data(&h, param.input_h_filename, dims))) ABORT();
+  }
+  checkMPISuccess(MPI_Bcast(&param, 6, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&param.source_type, 2, MPI_INT, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&h, 2, MPI_INT, 0, MPI_COMM_WORLD));
+  checkMPISuccess(MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  if (h.nx < h.ny) swap_adjacent(dims);  // swap in order to have shortest subdomains' borders => less MPI communication
+
   checkMPISuccess(MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1, &cart_comm));
   checkMPISuccess(MPI_Comm_size(cart_comm, &cart_size));
   checkMPISuccess(MPI_Comm_rank(cart_comm, &rank));
@@ -306,18 +326,6 @@ int main(int argc, char **argv) {
               has_right_neighbor = neighbors[RIGHT] != MPI_PROC_NULL,
               has_down_neighbor = neighbors[DOWN] != MPI_PROC_NULL,
               has_up_neighbor = neighbors[UP] != MPI_PROC_NULL;
-
-  struct parameters param;
-  struct data h;
-  if (!rank) {
-    if (unlikely(read_parameters(&param, argv[1]))) ABORT();
-    print_parameters(&param);
-    if (unlikely(read_data(&h, param.input_h_filename, dims))) ABORT();
-  }
-  checkMPISuccess(MPI_Bcast(&param, 6, MPI_DOUBLE, 0, cart_comm));
-  checkMPISuccess(MPI_Bcast(&param.source_type, 2, MPI_INT, 0, cart_comm));
-  checkMPISuccess(MPI_Bcast(&h, 2, MPI_INT, 0, cart_comm));
-  checkMPISuccess(MPI_Bcast(&h.dx, 2, MPI_DOUBLE, 0, cart_comm));
 
   // gridsize will include padding and be perfectly dividable into dims ranks
   int tmp_mod, *sendcounts, *displs;
