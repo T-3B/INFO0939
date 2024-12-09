@@ -220,13 +220,10 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
     }
 
   
-    #pragma omp target enter data map(alloc: data->values[0:nx*ny])
-    #pragma omp target teams distribute parallel for map(tofrom: data->values[0:nx*ny])
     for (unsigned i = 0; i < nx * ny; i++) {
         data->values[i] = val;
 	puts("WHAT");
     }
-    #pragma omp target exit data map(from: data->values[0:nx*ny])
     return 0;
 }
 
@@ -243,9 +240,6 @@ static void interpolate_data(const struct data *const interp, const struct data 
     // -> map to/from: handles data transfer between the CPU and the GPU.
 
     // Parallelizing the interpolation calculation
-    #pragma omp target teams distribute parallel for collapse(2) \
-        map(to: data->values[0:data->nx * data->ny]) \
-        map(from: interp->values[0:nx * ny])
     for (int jj = 0; jj < ny; jj++) {
         for (int ii = 0; ii < nx; ii++) {
             const double y = jj * dy;
@@ -264,7 +258,6 @@ static void interpolate_data(const struct data *const interp, const struct data 
             const double v01 = GET(data, i, j + 1);
             const double v10 = GET(data, i + 1, j);
             const double v11 = GET(data, i + 1, j + 1);
-	    puts("edbiebi")
             const double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
             const double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
             SET(interp, ii, jj, v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
@@ -319,7 +312,6 @@ int main(int argc, char **argv)
   // Map 3 arrays for u, v, and eta on the CPU and GPU for faster transfer
   for (int n = 0; n < nt; n++) {
     if (n && (n % (nt / 10)) == 0) {
-      puts("OKAY")
       const double time_sofar = GET_TIME() - start;
       const double eta = (nt - n) * time_sofar / n;
       printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
@@ -394,3 +386,4 @@ int main(int argc, char **argv)
 
   return 0;
 }
+
