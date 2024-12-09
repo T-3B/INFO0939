@@ -14,28 +14,12 @@
 #include <omp.h>
 #endif
 
-#ifdef USE_MPI
-# include <mpi.h>
-# define ABORT() MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE)
-# define GET_TIME() (MPI_Wtime())  // wall time
-  enum neighbor { UP, DOWN, LEFT, RIGHT };
-  static void checkMPISuccess(const int code) {
-    if (unlikely(code != MPI_SUCCESS)) {
-      char err_str[MPI_MAX_ERROR_STRING];
-      int err_len;  // TODO what about NULL?
-      fputs(MPI_Error_string(code, err_str, &err_len) == MPI_SUCCESS ? err_str : "MPI error!", stderr);
-      fputc('\n', stderr);
-      MPI_Abort(MPI_COMM_WORLD, code);
-    }
-  }
-#else
 # define ABORT() exit(EXIT_FAILURE)
 # ifdef _OPENMP
 #  define GET_TIME() (omp_get_wtime())  // wall time
 # else
 #  define GET_TIME() ((double)clock() / CLOCKS_PER_SEC)  // cpu time
 # endif
-#endif
 
 struct parameters {
   double dx, dy, dt, max_t, g, gamma;
@@ -240,9 +224,9 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
     #pragma omp target teams distribute parallel for map(tofrom: data->values[0:nx*ny])
     for (unsigned i = 0; i < nx * ny; i++) {
         data->values[i] = val;
+	puts("WHAT");
     }
     #pragma omp target exit data map(from: data->values[0:nx*ny])
-
     return 0;
 }
 
@@ -268,7 +252,7 @@ static void interpolate_data(const struct data *const interp, const struct data 
             int j = (int)(y / data->dy);
             const double x = ii * dx;
             int i = (int)(x / data->dx);
-
+	    puts("YOLO");
             // Ensure indices are within bounds
             if (j < 0) j = 0;
             if (j >= data->ny - 1) j = data->ny - 2;
@@ -280,7 +264,7 @@ static void interpolate_data(const struct data *const interp, const struct data 
             const double v01 = GET(data, i, j + 1);
             const double v10 = GET(data, i + 1, j);
             const double v11 = GET(data, i + 1, j + 1);
-
+	    puts("edbiebi")
             const double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
             const double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
             SET(interp, ii, jj, v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
@@ -328,14 +312,14 @@ int main(int argc, char **argv)
   interpolate_data(&h_interp, &h, nx, ny, param.dx, param.dy);
 
   const double start = GET_TIME();
-
-  // Map 3 arrays for u, v, and eta on the CPU and GPU for faster transfer
   #pragma omp target data map(tofrom: eta.values[0:nx*ny], \
-                               u.values[0:(nx+1)*ny],       \
-                               v.values[0:nx*(ny+1)],       \
-                               h_interp.values[0:nx*ny])
+                             u.values[0:(nx+1)*ny],       \
+                             v.values[0:nx*(ny+1)],       \
+                             h_interp.values[0:nx*ny])
+  // Map 3 arrays for u, v, and eta on the CPU and GPU for faster transfer
   for (int n = 0; n < nt; n++) {
     if (n && (n % (nt / 10)) == 0) {
+      puts("OKAY")
       const double time_sofar = GET_TIME() - start;
       const double eta = (nt - n) * time_sofar / n;
       printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
@@ -367,11 +351,12 @@ int main(int argc, char **argv)
       SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
     } else {
       printf("Error: Unknown source type %d\n", param.source_type);
-      return 1;
+      
     }
 
     // Parallelize the update of eta, u, and v across the entire grid using GPU
-    #pragma omp target teams distribute parallel for collapse(2)
+   // #pragma omp target teams distribute parallel for collapse(2)
+   // Still an error here and don't know why
     for (int j = 0; j < ny; j++) {  
       for (int i = 0; i < nx; i++) {
         // Update eta
