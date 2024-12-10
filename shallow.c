@@ -35,6 +35,17 @@
     ptr[0] = ptr[1];
     ptr[1] = tmp;
   }
+  static inline void distribute_work(const int x, const int rank, const int size, int *restrict const local_x, int *restrict const offset_x) {
+    // this function (and ONLY this one) is *inspired* of [Divide N items into M groups with as near equal size as possible](https://math.stackexchange.com/a/199693/1035937)
+    const int base_x = x / size, remainder = x % size;
+    if (rank < remainder) {
+      *local_x = base_x + 1;
+      *offset_x = rank * *local_x;
+    } else {
+      *local_x = base_x;
+      *offset_x = rank * *local_x + remainder;
+    }
+  }
 #else
 # define ABORT() exit(EXIT_FAILURE)
 # ifdef _OPENMP
@@ -322,9 +333,10 @@ int main(int argc, char **argv) {
               has_up_neighbor = neighbors[UP] != MPI_PROC_NULL;
 
   // extract subdomain
-  const int subsizes[2] = {h.nx / dims[0] + !has_right_neighbor * h.nx % dims[0], h.ny / dims[1] + !has_up_neighbor * h.ny % dims[1]},
-            hx_offset = h.nx / dims[0] * coords[0], hy_offset = h.ny / dims[1] * coords[1],
-            nx_offset = floor(h.nx / dims[0] * h.dx / param.dx) * coords[0], ny_offset = floor(h.ny / dims[1] * h.dy / param.dy) * coords[1];
+  int subsizes[2], hx_offset, hy_offset;
+  distribute_work(h.nx, coords[0], dims[0], subsizes, &hx_offset);
+  distribute_work(h.ny, coords[1], dims[1], subsizes + 1, &hy_offset);
+  const int nx_offset = floor(hx_offset * h.dx / param.dx), ny_offset = floor(hy_offset * h.dy / param.dy);
   for (int j = 0, idx = 0; j < subsizes[1]; j++)
     for (int i = 0; i < subsizes[0]; i++, idx++)
       h.values[idx] = GET(&h, i + hx_offset, j + hy_offset);
@@ -338,6 +350,7 @@ int main(int argc, char **argv) {
   const double hy = h.ny * h.dy;
   const int nx = max(1, floor(hx / param.dx)), ny = max(1, floor(hy / param.dy)), nt = floor(param.max_t / param.dt);
 #ifdef USE_MPI
+  MPI_Request requests[4];
   MPI_Datatype vertical_ghost_cells;  // for ghost cells: u_send_to_left, eta_send_to_right
   checkMPISuccess(MPI_Type_vector(ny, 1, nx + 1, MPI_DOUBLE, &vertical_ghost_cells));
   checkMPISuccess(MPI_Type_create_resized(vertical_ghost_cells, 0, (nx + 1) * sizeof(double), &vertical_ghost_cells));
@@ -364,15 +377,11 @@ int main(int argc, char **argv) {
   init_data(&h_interp, nx + 1, ny + 1, param.dx, param.dy, 0.);
   interpolate_data(&h_interp, &h, nx + 1, ny + 1, param.dx, param.dy);
 
+  const double c1 = param.dt * param.g;
+  const double c2 = param.dt * param.gamma;
+
   const double start = GET_TIME();
   for (int n = 0; n < nt; n++) {
-
-    if (!rank && n && (n % (nt / 10)) == 0) {
-      const double time_sofar = GET_TIME() - start;
-      const double time_eta = (nt - n) * time_sofar / n;
-      printf("Computing step %d/%d (ETA: %g seconds)\n", n, nt, time_eta);
-      fflush(stdout);
-    }
 
     // output solution
     if (param.sampling_rate && !(n % param.sampling_rate)) {
@@ -389,14 +398,14 @@ int main(int argc, char **argv) {
       free_data(&eta_without_ghost);
     }
     
-    checkMPISuccess(MPI_Sendrecv(&GET(&u, 0, 0), 1, vertical_ghost_cells, neighbors[LEFT], 0,
-                                 &GET(&u, nx, 0), 1, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, MPI_STATUS_IGNORE));
-    checkMPISuccess(MPI_Sendrecv(&GET(&eta, nx, 1), 1, vertical_ghost_cells, neighbors[RIGHT], 0,
-                                 &GET(&eta, 0, 1), 1, vertical_ghost_cells, neighbors[LEFT], 0, cart_comm, MPI_STATUS_IGNORE));
-    checkMPISuccess(MPI_Sendrecv(&GET(&v, 0, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0,
-                                 &GET(&v, 0, ny), nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, MPI_STATUS_IGNORE));
-    checkMPISuccess(MPI_Sendrecv(&GET(&eta, 1, ny), nx, MPI_DOUBLE, neighbors[UP], 0,
-                                 &GET(&eta, 1, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, MPI_STATUS_IGNORE));
+    checkMPISuccess(MPI_Isendrecv(&GET(&u, 0, 0), 1, vertical_ghost_cells, neighbors[LEFT], 0,
+                                 &GET(&u, nx, 0), 1, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, &requests[0]));
+    checkMPISuccess(MPI_Isendrecv(&GET(&eta, nx, 1), 1, vertical_ghost_cells, neighbors[RIGHT], 0,
+                                 &GET(&eta, 0, 1), 1, vertical_ghost_cells, neighbors[LEFT], 0, cart_comm, &requests[1]));
+    checkMPISuccess(MPI_Isendrecv(&GET(&v, 0, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0,
+                                 &GET(&v, 0, ny), nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, &requests[2]));
+    checkMPISuccess(MPI_Isendrecv(&GET(&eta, 1, ny), nx, MPI_DOUBLE, neighbors[UP], 0,
+                                 &GET(&eta, 1, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, &requests[3]));
     // impose boundary conditions
     const double t = n * param.dt;
     if (param.source_type == 1) {  // sinusoidal velocity on top boundary
@@ -446,9 +455,16 @@ int main(int argc, char **argv) {
     }
 #endif
 
+    if (!rank && n && (n % (nt / 10)) == 0) {
+      const double time_sofar = GET_TIME() - start;
+      const double time_eta = (nt - n) * time_sofar / n;
+      printf("Computing step %d/%d (ETA: %g seconds)\n", n, nt, time_eta);
+      fflush(stdout);
+    }
+
     #pragma omp parallel for
-    for (int j = 0; j < ny; j++) {  // CHANGED (question 4)
-      for (int i = 0; i < nx; i++) {
+    for (int j = is_using_mpi; j < ny-is_using_mpi; j++) {  // CHANGED (question 4)
+      for (int i = is_using_mpi; i < nx -is_using_mpi; i++) {
         // update eta
         const double h_ij = GET(&h_interp, i, j);
         double u_ij = GET(&u, i, j);
@@ -459,8 +475,6 @@ int main(int argc, char **argv) {
         SET(&eta, i + is_using_mpi, j + is_using_mpi, eta_ij);
 
         // update u and v
-        const double c1 = param.dt * param.g;
-        const double c2 = param.dt * param.gamma;
         const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
         const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
         u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
@@ -469,6 +483,30 @@ int main(int argc, char **argv) {
         SET(&v, i, j, v_ij);
       }
     }
+#ifdef USE_MPI
+    checkMPISuccess(MPI_Waitall(4, requests, MPI_STATUSES_IGNORE));
+    #pragma omp parallel for
+    for (int j = 0; j < ny; j++) {
+      for (int i = 0; i < nx; i += i || !j || j == ny - 1 ? 1 : nx - 1) {
+        // update eta
+        const double h_ij = GET(&h_interp, i, j);
+        double u_ij = GET(&u, i, j);
+        double v_ij = GET(&v, i, j);
+        const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi) - param.dt * (
+          (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
+          + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
+        SET(&eta, i + is_using_mpi, j + is_using_mpi, eta_ij);
+
+        // update u and v
+        const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
+        const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
+        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
+        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+        SET(&u, i, j, u_ij);
+        SET(&v, i, j, v_ij);
+      }
+    }
+#endif
   }
 #ifdef USE_MPI
   if (!rank) {
