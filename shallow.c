@@ -397,7 +397,29 @@ int main(int argc, char **argv) {
       //write_data_vtk(&v, "y velocity", param.output_v_filename, n, nx_offset, ny_offset, rank);
       free_data(&eta_without_ghost);
     }
-    
+    if (n)
+      checkMPISuccess(MPI_Waitall(4, requests, MPI_STATUSES_IGNORE));
+    #pragma omp parallel for
+    for (int j = 0; j < ny; j++) {
+      for (int i = 0; i < nx; i += i || !j || j == ny - 1 ? 1 : nx - 1) {
+        // update eta
+        const double h_ij = GET(&h_interp, i, j);
+        double u_ij = GET(&u, i, j);
+        double v_ij = GET(&v, i, j);
+        const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi) - param.dt * (
+          (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
+          + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
+        SET(&eta, i + is_using_mpi, j + is_using_mpi, eta_ij);
+
+        // update u and v
+        const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
+        const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
+        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
+        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+        SET(&u, i, j, u_ij);
+        SET(&v, i, j, v_ij);
+      }
+    }
     checkMPISuccess(MPI_Isendrecv(&GET(&u, 0, 0), 1, vertical_ghost_cells, neighbors[LEFT], 0,
                                  &GET(&u, nx, 0), 1, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, &requests[0]));
     checkMPISuccess(MPI_Isendrecv(&GET(&eta, nx, 1), 1, vertical_ghost_cells, neighbors[RIGHT], 0,
@@ -410,12 +432,12 @@ int main(int argc, char **argv) {
     const double t = n * param.dt;
     if (param.source_type == 1) {  // sinusoidal velocity on top boundary
       for (int j = ny; j--;) {  // CHANGED (question 4)
-        if (!has_left_neighbor) SET(&u, 0, j, AMP * sin(2 * M_PI * FREQ * t));
+        if (!has_left_neighbor) SET(&u, 0, j, 0.);
         if (!has_right_neighbor) SET(&u, nx, j, 0.);
       }
       for (int i = nx; i--;) {
         if (!has_down_neighbor) SET(&v, i, 0, 0.);
-        if (!has_up_neighbor) SET(&v, i, ny, 0.);
+        if (!has_up_neighbor) SET(&v, i, ny, AMP * sin(2 * M_PI * FREQ * t));
       }
     } else if (param.source_type == 2) {  // sinusoidal elevation in the middle of the subdomain of one MPI rank
       if (coords[0] == dims[0] / 2 && coords[1] == dims[1] / 2) SET(&eta, nx / 2, ny / 2, AMP * sin(2 * M_PI * FREQ * t));
@@ -484,28 +506,7 @@ int main(int argc, char **argv) {
       }
     }
 #ifdef USE_MPI
-    checkMPISuccess(MPI_Waitall(4, requests, MPI_STATUSES_IGNORE));
-    #pragma omp parallel for
-    for (int j = 0; j < ny; j++) {
-      for (int i = 0; i < nx; i += i || !j || j == ny - 1 ? 1 : nx - 1) {
-        // update eta
-        const double h_ij = GET(&h_interp, i, j);
-        double u_ij = GET(&u, i, j);
-        double v_ij = GET(&v, i, j);
-        const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi) - param.dt * (
-          (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
-          + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
-        SET(&eta, i + is_using_mpi, j + is_using_mpi, eta_ij);
-
-        // update u and v
-        const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
-        const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
-        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
-        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
-        SET(&u, i, j, u_ij);
-        SET(&v, i, j, v_ij);
-      }
-    }
+    
 #endif
   }
 #ifdef USE_MPI
