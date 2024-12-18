@@ -205,24 +205,31 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
     return 0;
 }
 
-static int write_manifest_vtk(const char *restrict const filename, const double dt, const int nt, const int sampling_rate) {
+int write_manifest_vtk(const char *name, const char *filename,
+                       double dt, int nt, int sampling_rate)
+{
   char out[512];
   sprintf(out, "%s.pvd", filename);
-  const char *const base_filename = basename((char *)filename);
 
-  FILE *const fp = fopen(out, "wb");
-  if (unlikely(!fp)) {
+  FILE *fp = fopen(out, "wb");
+  if (!fp)
+  {
     printf("Error: Could not open output VTK manifest file '%s'\n", out);
     return 1;
   }
 
-  fprintf(fp, "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\">\n");
+  fprintf(fp, "<VTKFile type=\"Collection\" version=\"0.1\" "
+              "byte_order=\"LittleEndian\">\n");
   fprintf(fp, "  <Collection>\n");
-  if (sampling_rate)
-    for (int n = 0; n < nt; n++)
-      if (!(n % sampling_rate))
-        fprintf(fp, "    <DataSet timestep=\"%g\" file='%s_%d.vti'/>\n", n * dt, base_filename, n);
-
+  for (int n = 0; n < nt; n++)
+  {
+    if (sampling_rate && !(n % sampling_rate))
+    {
+      double t = n * dt;
+      fprintf(fp, "    <DataSet timestep=\"%g\" file='%s_%d.vti'/>\n", t,
+              filename, n);
+    }
+  }
   fprintf(fp, "  </Collection>\n");
   fprintf(fp, "</VTKFile>\n");
   fclose(fp);
@@ -309,115 +316,165 @@ void interpolate_data(const struct data *h, const struct data *h_interp)
 
 
 
-int main(int argc, char **argv){
-  if (argc != 2) {
+int main(int argc, char **argv)
+{
+  if (argc != 2)
+  {
     printf("Usage: %s parameter_file\n", argv[0]);
     return 1;
   }
 
   struct parameters param;
-  if (read_parameters(&param, argv[1])) {
+  if (read_parameters(&param, argv[1]))
     return 1;
-  }
   print_parameters(&param);
 
   struct data *h = malloc(sizeof(struct data));
-  if (read_data(h, param.input_h_filename)) {
+  if (read_data(h, param.input_h_filename))
     return 1;
-  }
 
-  // Infer size of domain from input elevation data
-  const double hx = h->nx * h->dx;
-  const double hy = h->ny * h->dy;
-  const int nx = max(1, floor(hx / param.dx));
-  const int ny = max(1, floor(hy / param.dy));
-  const int nt = floor(param.max_t / param.dt);
+  // infer size of domain from input elevation data
+  double hx = h->nx * h->dx;
+  double hy = h->ny * h->dy;
+  int nx = floor(hx / param.dx);
+  int ny = floor(hy / param.dy);
+  if (nx <= 0)
+    nx = 1;
+  if (ny <= 0)
+    ny = 1;
+  int nt = floor(param.max_t / param.dt);
 
-  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n", hx, hy, nx, ny, nx * ny);
+  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
+         hx, hy, nx, ny, nx * ny);
   printf(" - number of time steps: %d\n", nt);
 
-  struct data *eta, *u, *v, *h_interp;
+  struct data *eta, *u, *v;
   eta = malloc(sizeof(struct data));
   u = malloc(sizeof(struct data));
   v = malloc(sizeof(struct data));
-  h_interp = malloc(sizeof(struct data));
-  init_data(eta, nx, ny, param.dx, param.dy, 0.0);
-  init_data(u, nx + 1, ny, param.dx, param.dy, 0.0);
-  init_data(v, nx, ny + 1, param.dx, param.dy, 0.0);
-  init_data(h_interp, nx, ny, param.dx, param.dy, 0.0);
-  const double start = GET_TIME();
-  #pragma omp target data map(to: u[0:1], v[0:1], h_interp[0:1], h[0:1], eta[0:1])
-    // Interpolate bathymetry using interpolate_data
+  init_data(eta, nx, ny, param.dx, param.dy, 0.);
+  init_data(u, nx + 1, ny, param.dx, param.dy, 0.);
+  init_data(v, nx, ny + 1, param.dx, param.dy, 0.);
+
+  // interpolate bathymetry
+  struct data *h_interp = malloc(sizeof(struct data));
+  init_data(h_interp, nx, ny, param.dx, param.dy, 0.);
+
+  double start = GET_TIME();
+
+#pragma omp target data map(to: u[0:1], \
+                                v[0:1], \
+                                h_interp[0:1], \
+                                h[0:1], \
+                                eta[0:1])
+  {
+
     interpolate_data(h, h_interp);
-    for (int n = 0; n < nt; n++) {
 
-      // if (n && (n % (nt / 10)) == 0) {
-      //   const double time_sofar = GET_TIME() - start;
-      //   const double eta = (nt - n) * time_sofar / n;
-      //   printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
-      //   fflush(stdout);
-      // }
+    for (int n = 0; n < nt; n++)
+    {
 
-      // Output solution
-      if (param.sampling_rate && !(n % param.sampling_rate)) {
+      /*
+      if (n && (n % (nt / 10)) == 0)
+      {
+        double time_sofar = GET_TIME() - start;
+        double eta = (nt - n) * time_sofar / n;
+        printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
+        fflush(stdout);
+      }
+      */
+
+      // output solution
+      if (param.sampling_rate && !(n % param.sampling_rate))
+      {
         #pragma omp target update from(eta[0:1])
         write_data_vtk(eta, "water elevation", param.output_eta_filename, n);
+        // write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+        // write_data_vtk(&v, "y velocity", param.output_v_filename, n);
       }
 
-      const double t = n * param.dt;
-      if (param.source_type == 1) {
-        const double A = 5;
-        const double f = 1. / 20.;
-
+      // impose boundary conditions
+      double t = n * param.dt;
+      if (param.source_type == 1)
+      {
+        // sinusoidal velocity on top boundary
+        double A = 5;
+        double f = 1. / 20.;
         #pragma omp target teams distribute
-        for (int i = 0; i < ny; i++) {
-          SET(u, 0, i, 0.0);
-          SET(u, nx, i, 0.0);
+        for (int j = 0; j < ny; j++)
+        {
+          #pragma omp parallel for
+          for (int i = 0; i < nx; i++)
+          {
+            SET(u, 0, j, 0.);
+            SET(u, nx, j, 0.);
+            SET(v, i, 0, 0.);
+            SET(v, i, ny, A * sin(2 * M_PI * f * t));
+          }
         }
-        #pragma omp target teams distribute
-        for (int i = 0; i < nx; i++) {
-          SET(v, i, 0, 0.0);
-          SET(v, i, ny, A * sin(2 * M_PI * f * t));
-        }
-      } else if (param.source_type == 2) {
-        const double A = 5;
-        const double f = 1. / 20.;
+      }
+      else if (param.source_type == 2)
+      {
+        // sinusoidal elevation in the middle of the domain
+        double A = 5;
+        double f = 1. / 20.;
         SET(eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
-      } else {
+      }
+      else
+      {
+        // TODO: add other sources
         printf("Error: Unknown source type %d\n", param.source_type);
-        
+        exit(0);
       }
 
+// update eta
       #pragma omp target teams distribute
-      for (int j = 0; j < ny; j++) { 
+      for (int j = 0; j < ny; j++)
+      {
         #pragma omp parallel for
-        for (int i = 0; i < nx; i++) {
-          // Update eta
-          const double h_ij = GET(h_interp, i, j);
-          double u_ij = GET(u, i, j);
-          double v_ij = GET(v, i, j);
-          const double eta_ij = GET(eta, i, j) - param.dt * (
-            (GET(h_interp, i + 1, j) * GET(u, i + 1, j) - h_ij * u_ij) / param.dx
-            + (GET(h_interp, i, j + 1) * GET(v, i, j + 1) - h_ij * v_ij) / param.dy);
-          SET(eta, i, j, eta_ij);
+        for (int i = 0; i < nx; i++)
+        {
+          double h_ij = GET(h_interp, i, j);
+          double h_i1j = GET(h_interp, MIN(i + 1, nx - 1), j);
+          double h_ij1 = GET(h_interp, i, MIN(j + 1, ny - 1));
+          double c0 = param.dt * h_ij;
+          double c1 = param.dt * h_i1j;
+          double c2 = param.dt * h_ij1;
 
-          // Update u and v
-          const double c1 = param.dt * param.g;
-          const double c2 = param.dt * param.gamma;
-          const double eta_imj = i ? GET(eta, i - 1, j) : eta_ij;
-          const double eta_ijm = j ? GET(eta, i, j - 1) : eta_ij;
-          u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
-          v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+          double eta_ij = GET(eta, i, j) - (c1 * GET(u, i + 1, j) - c0 * GET(u, i, j)) / param.dx - (c2 * GET(v, i, j + 1) - c0 * GET(v, i, j)) / param.dy;
+          SET(eta, i, j, eta_ij);
+        }
+      }
+
+// update u and v
+      #pragma omp target teams distribute
+      for (int j = 0; j < ny; j++)
+      {
+        #pragma omp parallel for
+        for (int i = 0; i < nx; i++)
+        {
+          double c1 = param.dt * param.g;
+          double c2 = param.dt * param.gamma;
+          double eta_ij = GET(eta, i, j);
+          double eta_imj = GET(eta, (i == 0) ? 0 : i - 1, j);
+          double eta_ijm = GET(eta, i, (j == 0) ? 0 : j - 1);
+          double u_ij = (1. - c2) * GET(u, i, j) - c1 / param.dx * (eta_ij - eta_imj);
+          double v_ij = (1. - c2) * GET(v, i, j) - c1 / param.dy * (eta_ij - eta_ijm);
           SET(u, i, j, u_ij);
           SET(v, i, j, v_ij);
         }
       }
     }
-  
+  }
 
-  write_manifest_vtk(param.output_eta_filename, param.dt, nt, param.sampling_rate);
+  write_manifest_vtk("water elevation", param.output_eta_filename,
+                     param.dt, nt, param.sampling_rate);
+  // write_manifest_vtk("x velocity", param.output_u_filename,
+  //                    param.dt, nt, param.sampling_rate);
+  // write_manifest_vtk("y velocity", param.output_v_filename,
+  //                    param.dt, nt, param.sampling_rate);
 
-  const double time = GET_TIME() - start;
+  double time = GET_TIME() - start;
   printf("\nDone: %g seconds (%g MUpdates/s)\n", time,
          1e-6 * (double)eta->nx * (double)eta->ny * (double)nt / time);
 
