@@ -241,55 +241,9 @@ void free_data(struct data *data){
   free(data->values);
 }
 
-// void interpolate_data(const struct data *h, const struct data *h_interp)
-// {
-//   #pragma omp target teams distribute
-//   for (int j = 0; j < h_interp->ny; j++)
-//   {
-//     #pragma omp parallel for
-//     for (int i = 0; i < h_interp->nx; i++)
-//     {
-//       int x = i * h_interp->dx;
-//       int y = j * h_interp->dy;
-
-//       int x_index = (int)(x / h->dx);
-//       int y_index = (int)(y / h->dy);
-
-//       if (x_index < 0)
-//         x_index = 0;
-//       if (x_index >= h->nx - 1)
-//         x_index = h->nx - 2; // Ensure we have a valid neighbor
-//       if (y_index < 0)
-//         y_index = 0;
-//       if (y_index >= h->ny - 1)
-//         y_index = h->ny - 2;
-
-//       double h_kl = GET(h, x_index, y_index);
-//       double h_k1l = GET(h, x_index + 1, y_index);
-//       double h_kl1 = GET(h, x_index, y_index + 1);
-//       double h_k1l1 = GET(h, x_index + 1, y_index + 1);
-
-//       // Get the four surrounding points
-//       double x_k = x_index * h->dx;
-//       double x_k1 = (x_index + 1) * h->dx;
-//       double y_l = y_index * h->dy;
-//       double y_l1 = (y_index + 1) * h->dy;
-
-//       // Bilinear interpolation
-//       double denom = (x_k1 - x_k) * (y_l1 - y_l);
-//       double h_val = 1.0 / denom * (h_kl * (x_k1 - x) * (y_l1 - y) + h_k1l * (x - x_k) * (y_l1 - y) + h_kl1 * (x_k1 - x) * (y - y_l) + h_k1l1 * (x - x_k) * (y - y_l));
-//       SET(h_interp, i, j, h_val);
-//     }
-//   }
-// }
 
 static void interpolate_data(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
-    // Trying to explain what i understood :
-    // -> teams = group of threads working together on a part, so here we divide the computation into multiple teams.
-    // -> collapse combines loops for better parallel performance.
-    // -> map to/from: handles data transfer between the CPU and the GPU.
-
-    // Parallelizing the interpolation calculation
+    // I think we can parallelize this even more need to be checked
     #pragma omp target teams distribute
     for (int jj = 0; jj < ny; jj++) {
         #pragma omp parallel for
@@ -298,12 +252,10 @@ static void interpolate_data(const struct data *const interp, const struct data 
             int j = (int)(y / data->dy);
             const double x = ii * dx;
             int i = (int)(x / data->dx);
-            // Ensure indices are within bounds
             if (j < 0) j = 0;
             if (j >= data->ny - 1) j = data->ny - 2;
             if (i < 0) i = 0;
             if (i >= data->nx - 1) i = data->nx - 2;
-            // Perform bilinear interpolation
             const double v00 = GET(data, i, j);
             const double v01 = GET(data, i, j + 1);
             const double v10 = GET(data, i + 1, j);
@@ -317,85 +269,70 @@ static void interpolate_data(const struct data *const interp, const struct data 
 
 
 
-int main(int argc, char **argv)
-{
-  if (argc != 2)
-  {
+int main(int argc, char **argv) {
+  if (argc != 2) {
     printf("Usage: %s parameter_file\n", argv[0]);
     return 1;
   }
 
   struct parameters param;
-  if (read_parameters(&param, argv[1]))
+  if (read_parameters(&param, argv[1])) {
     return 1;
+  }
   print_parameters(&param);
 
   struct data *h = malloc(sizeof(struct data));
-  if (read_data(h, param.input_h_filename))
+  if (read_data(h, param.input_h_filename)) {
     return 1;
+  }
 
   // infer size of domain from input elevation data
-  double hx = h->nx * h->dx;
-  double hy = h->ny * h->dy;
-  int nx = floor(hx / param.dx);
-  int ny = floor(hy / param.dy);
-  if (nx <= 0)
-    nx = 1;
-  if (ny <= 0)
-    ny = 1;
-  int nt = floor(param.max_t / param.dt);
+  const double hx = h->nx * h->dx;
+  const double hy = h->ny * h->dy;
+  const int nx = max(1, floor(hx / param.dx));
+  const int ny = max(1, floor(hy / param.dy));
+  const int nt = floor(param.max_t / param.dt);
 
-  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
-         hx, hy, nx, ny, nx * ny);
+  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",hx, hy, nx, ny, nx * ny);
   printf(" - number of time steps: %d\n", nt);
 
-  struct data *eta, *u, *v;
+  struct data *eta, *u, *v, *h_interp;
   eta = malloc(sizeof(struct data));
   u = malloc(sizeof(struct data));
   v = malloc(sizeof(struct data));
+  h_interp = malloc(sizeof(struct data));
+
   init_data(eta, nx, ny, param.dx, param.dy, 0.);
   init_data(u, nx + 1, ny, param.dx, param.dy, 0.);
   init_data(v, nx, ny + 1, param.dx, param.dy, 0.);
-
-  // interpolate bathymetry
-  struct data *h_interp = malloc(sizeof(struct data));
   init_data(h_interp, nx, ny, param.dx, param.dy, 0.);
 
   double start = GET_TIME();
 
-#pragma omp target data map(to: u[0:1], \
+    #pragma omp target data map(to: u[0:1], \
                                 v[0:1], \
                                 h_interp[0:1], \
                                 h[0:1], \
                                 eta[0:1])
   {
 
-    interpolate_data(&h_interp, &h, nx, ny, param.dx, param.dy);
+    interpolate_data(h_interp, h, nx, ny, param.dx, param.dy);
 
-    for (int n = 0; n < nt; n++)
-    {
-
-      /*
-      if (n && (n % (nt / 10)) == 0)
-      {
-        double time_sofar = GET_TIME() - start;
-        double eta = (nt - n) * time_sofar / n;
+    for (int n = 0; n < nt; n++) {
+      if (n && (n % (nt / 10)) == 0) {
+        const double time_sofar = GET_TIME() - start;
+        const double eta = (nt - n) * time_sofar / n;
         printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
         fflush(stdout);
       }
-      */
-
-      // output solution
-      if (param.sampling_rate && !(n % param.sampling_rate))
-      {
+      
+      // Output solution
+      if (param.sampling_rate && !(n % param.sampling_rate)) {
         #pragma omp target update from(eta[0:1])
         write_data_vtk(eta, "water elevation", param.output_eta_filename, n);
-        // write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-        // write_data_vtk(&v, "y velocity", param.output_v_filename, n);
       }
 
-      // impose boundary conditions
-      double t = n * param.dt;
+      const double t = n * param.dt;
       if (param.source_type == 1)
       {
         // sinusoidal velocity on top boundary
