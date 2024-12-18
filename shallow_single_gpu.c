@@ -362,33 +362,22 @@ int main(int argc, char **argv) {
       for (int j = 0; j < ny; j++) {
         #pragma omp parallel for
         for (int i = 0; i < nx; i++) {
-          double h_ij = GET(h_interp, i, j);
-          double h_i1j = GET(h_interp, MIN(i + 1, nx - 1), j);
-          double h_ij1 = GET(h_interp, i, MIN(j + 1, ny - 1));
-          double c0 = param.dt * h_ij;
-          double c1 = param.dt * h_i1j;
-          double c2 = param.dt * h_ij1;
+            const double h_ij = GET(h_interp, i, j);
+            double u_ij = GET(u, i, j);
+            double v_ij = GET(v, i, j);
+            const double eta_ij = GET(eta, i, j) - param.dt * (
+                (GET(h_interp, i + 1, j) * GET(u, i + 1, j) - h_ij * u_ij) / param.dx +
+                (GET(h_interp, i, j + 1) * GET(v, i, j + 1) - h_ij * v_ij) / param.dy);
+            SET(eta, i, j, eta_ij);
 
-          double eta_ij = GET(eta, i, j) - (c1 * GET(u, i + 1, j) - c0 * GET(u, i, j)) / param.dx - (c2 * GET(v, i, j + 1) - c0 * GET(v, i, j)) / param.dy;
-          SET(eta, i, j, eta_ij);
-        }
-      }
-
-      #pragma omp target teams distribute
-      for (int j = 0; j < ny; j++)
-      {
-        #pragma omp parallel for
-        for (int i = 0; i < nx; i++)
-        {
-          double c1 = param.dt * param.g;
-          double c2 = param.dt * param.gamma;
-          double eta_ij = GET(eta, i, j);
-          double eta_imj = GET(eta, (i == 0) ? 0 : i - 1, j);
-          double eta_ijm = GET(eta, i, (j == 0) ? 0 : j - 1);
-          double u_ij = (1. - c2) * GET(u, i, j) - c1 / param.dx * (eta_ij - eta_imj);
-          double v_ij = (1. - c2) * GET(v, i, j) - c1 / param.dy * (eta_ij - eta_ijm);
-          SET(u, i, j, u_ij);
-          SET(v, i, j, v_ij);
+            const double c1 = param.dt * param.g;
+            const double c2 = param.dt * param.gamma;
+            const double eta_imj = i ? GET(eta, i - 1, j) : eta_ij;
+            const double eta_ijm = j ? GET(eta, i, j - 1) : eta_ij;
+            u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
+            v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+            SET(u, i, j, u_ij);
+            SET(v, i, j, v_ij);
         }
       }
     }
