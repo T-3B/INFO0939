@@ -227,25 +227,19 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
     data->ny = ny;
     data->dx = dx;
     data->dy = dy;
-
-    // Allocate memory for 'values'
     data->values = malloc(nx * ny * sizeof(double));
     if (unlikely(!data->values)) {
         printf("Error: Could not allocate data\n");
         return 1;
     }
 
-  
-    #pragma omp target enter data map(alloc: data->values[0:nx*ny])
+    // tofrom in map for read and write data 
     #pragma omp target teams distribute parallel for map(tofrom: data->values[0:nx*ny])
     for (unsigned i = 0; i < nx * ny; i++) {
         data->values[i] = val;
     }
-    #pragma omp target exit data map(from: data->values[0:nx*ny])
-
     return 0;
 }
-
 
 
 static void free_data(struct data *const data) {
@@ -253,12 +247,6 @@ static void free_data(struct data *const data) {
 }
 
 static void interpolate_data(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
-    // Trying to explain what i understood :
-    // -> teams = group of threads working together on a part, so here we divide the computation into multiple teams.
-    // -> collapse combines loops for better parallel performance.
-    // -> map to/from: handles data transfer between the CPU and the GPU.
-
-    // Parallelizing the interpolation calculation
     #pragma omp target teams distribute parallel for collapse(2) \
         map(to: data->values[0:data->nx * data->ny]) \
         map(from: interp->values[0:nx * ny])
@@ -269,13 +257,11 @@ static void interpolate_data(const struct data *const interp, const struct data 
             const double x = ii * dx;
             int i = (int)(x / data->dx);
 
-            // Ensure indices are within bounds
             if (j < 0) j = 0;
             if (j >= data->ny - 1) j = data->ny - 2;
             if (i < 0) i = 0;
             if (i >= data->nx - 1) i = data->nx - 2;
 
-            // Perform bilinear interpolation
             const double v00 = GET(data, i, j);
             const double v01 = GET(data, i, j + 1);
             const double v10 = GET(data, i + 1, j);
@@ -289,8 +275,7 @@ static void interpolate_data(const struct data *const interp, const struct data 
 }
 
 
-
-int main(int argc, char **argv)
+ int main(int argc, char **argv)
 {
   if (argc != 2) {
     printf("Usage: %s parameter_file\n", argv[0]);
@@ -329,71 +314,75 @@ int main(int argc, char **argv)
 
   const double start = GET_TIME();
 
-  // Map 3 arrays for u, v, and eta on the CPU and GPU for faster transfer
-  #pragma omp target data map(tofrom: eta.values[0:nx*ny], \
-                               u.values[0:(nx+1)*ny],       \
-                               v.values[0:nx*(ny+1)],       \
-                               h_interp.values[0:nx*ny])
-  for (int n = 0; n < nt; n++) {
-    if (n && (n % (nt / 10)) == 0) {
-      const double time_sofar = GET_TIME() - start;
-      const double eta = (nt - n) * time_sofar / n;
-      printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
-      fflush(stdout);
-    }
+  // Map 3 arrays for u, v and eta on the CPU and GPU for faster transfer
+  // dimension of these arrays should be correct even though 
 
-    // Output solution
-    if (param.sampling_rate && !(n % param.sampling_rate)) {
-      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-    }
-
-    const double t = n * param.dt;
-    if (param.source_type == 1) {
-      const double A = 5;
-      const double f = 1. / 20.;
-
-      // Update boundary conditions for u and v in source type 1 (no GPU parallelization needed)
-      for (int i = 0; i < ny; i++) {
-        SET(&u, 0, i, 0.0);
-        SET(&u, nx, i, 0.0);
+#pragma omp target data map(tofrom: *eta.values[0:nx*ny], \
+                             u.values[0:(nx+1)*ny],       \
+                             v.values[0:nx*(ny+1)],       \
+                             h_interp.values[0:nx*ny])
+    for (int n = 0; n < nt; n++) {
+      if (n && (n % (nt / 10)) == 0) {
+        const double time_sofar = GET_TIME() - start;
+        const double eta = (nt - n) * time_sofar / n;
+        printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
+        fflush(stdout);
       }
-      for (int i = 0; i < nx; i++) {
-        SET(&v, i, 0, 0.0);
-        SET(&v, i, ny, A * sin(2 * M_PI * f * t));
-      }
-    } else if (param.source_type == 2) {
-      const double A = 5;
-      const double f = 1. / 20.;
-      SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
-    } else {
-      printf("Error: Unknown source type %d\n", param.source_type);
-      return 1;
-    }
 
-    // Parallelize the update of eta, u, and v across the entire grid using GPU
+      // Output solution
+      if (param.sampling_rate && !(n % param.sampling_rate)) {
+        write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
+      }
+
+      
+      const double t = n * param.dt;
+      if (param.source_type == 1) {
+        const double A = 5;
+        const double f = 1. / 20.;
+
+        // Not sure if this is usefull
+        #pragma omp target teams distribute parallel for
+        for (int i = 0; i < ny; i++) {
+          SET(&u, 0, i, 0.0);
+          SET(&u, nx, i, 0.0);
+        }
+        // Same not sure if this is good
+        #pragma omp target teams distribute parallel for
+        for (int i = 0; i < nx; i++) {
+          SET(&v, i, 0, 0.0);
+          SET(&v, i, ny, A * sin(2 * M_PI * f * t));
+        }
+      } else if (param.source_type == 2) {
+        const double A = 5;
+        const double f = 1. / 20.;
+        SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
+      } else {
+        printf("Error: Unknown source type %d\n", param.source_type);
+        return 1;
+      }
+    // Same as CPU OpenMp but using teams to distribute the computation i reuse collaspe but maybe it is not useful.
     #pragma omp target teams distribute parallel for collapse(2)
-    for (int j = 0; j < ny; j++) {  
-      for (int i = 0; i < nx; i++) {
-        // Update eta
-        const double h_ij = GET(&h_interp, i, j);
-        double u_ij = GET(&u, i, j);
-        double v_ij = GET(&v, i, j);
-        const double eta_ij = GET(&eta, i, j) - param.dt * (
-          (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
-          + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
-        SET(&eta, i, j, eta_ij);
+    for (int j = 0; j < ny; j++) {
+        for (int i = 0; i < nx; i++) {
+            const double h_ij = GET(&h_interp, i, j);
+            double u_ij = GET(&u, i, j);
+            double v_ij = GET(&v, i, j);
+            const double eta_ij = GET(&eta, i, j) - param.dt * (
+                (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx +
+                (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
+            SET(&eta, i, j, eta_ij);
 
-        // Update u and v
-        const double c1 = param.dt * param.g;
-        const double c2 = param.dt * param.gamma;
-        const double eta_imj = i ? GET(&eta, i - 1, j) : eta_ij;
-        const double eta_ijm = j ? GET(&eta, i, j - 1) : eta_ij;
-        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
-        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
-        SET(&u, i, j, u_ij);
-        SET(&v, i, j, v_ij);
-      }
+            const double c1 = param.dt * param.g;
+            const double c2 = param.dt * param.gamma;
+            const double eta_imj = i ? GET(&eta, i - 1, j) : eta_ij;
+            const double eta_ijm = j ? GET(&eta, i, j - 1) : eta_ij;
+            u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
+            v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+            SET(&u, i, j, u_ij);
+            SET(&v, i, j, v_ij);
+        }
     }
+    
   }
 
   write_manifest_vtk(param.output_eta_filename, param.dt, nt, param.sampling_rate);
