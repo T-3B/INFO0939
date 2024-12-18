@@ -1,11 +1,10 @@
 CC		= clang
 OMPI_CC	= $(CC)
-CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas
+CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas -Wno-unused-function
 LDLIBS	= -lm
 MPICC	= mpicc -DUSE_MPI
 OMP		= -fopenmp
 SRC		= shallow.c
-MPISRC	= shallow_mpi.c
 TARGET	= shallow
 
 export OMPI_CC
@@ -13,11 +12,11 @@ export OMPI_CC
 all: omp_mpi mpi omp serial
 
 omp_mpi: $(TARGET)
-$(TARGET): $(MPISRC)
+$(TARGET): $(SRC)
 	$(MPICC) $(CFLAGS) $(OMP) -o $@ $^ $(LDLIBS)
 
 mpi: $(TARGET)_mpi
-$(TARGET)_mpi: $(MPISRC)
+$(TARGET)_mpi: $(SRC)
 	$(MPICC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 omp: $(TARGET)_omp
