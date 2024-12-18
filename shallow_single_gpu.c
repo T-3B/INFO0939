@@ -333,17 +333,13 @@ int main(int argc, char **argv) {
       }
 
       const double t = n * param.dt;
-      if (param.source_type == 1)
-      {
-        // sinusoidal velocity on top boundary
-        double A = 5;
-        double f = 1. / 20.;
+      if (param.source_type == 1) {
+        const double A = 5;
+        const double f = 1. / 20.;
         #pragma omp target teams distribute
-        for (int j = 0; j < ny; j++)
-        {
+        for (int j = 0; j < ny; j++) {
           #pragma omp parallel for
-          for (int i = 0; i < nx; i++)
-          {
+          for (int i = 0; i < nx; i++) {
             SET(u, 0, j, 0.);
             SET(u, nx, j, 0.);
             SET(v, i, 0, 0.);
@@ -351,27 +347,21 @@ int main(int argc, char **argv) {
           }
         }
       }
-      else if (param.source_type == 2)
-      {
-        // sinusoidal elevation in the middle of the domain
-        double A = 5;
-        double f = 1. / 20.;
+      else if (param.source_type == 2) {
+        const double A = 5;
+        const double f = 1. / 20.;
         SET(eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
       }
-      else
-      {
-        // TODO: add other sources
+      else {
+        // TODO: add our other sources from the other files
         printf("Error: Unknown source type %d\n", param.source_type);
-        exit(0);
+        return 1;
       }
 
-// update eta
       #pragma omp target teams distribute
-      for (int j = 0; j < ny; j++)
-      {
+      for (int j = 0; j < ny; j++) {
         #pragma omp parallel for
-        for (int i = 0; i < nx; i++)
-        {
+        for (int i = 0; i < nx; i++) {
           double h_ij = GET(h_interp, i, j);
           double h_i1j = GET(h_interp, MIN(i + 1, nx - 1), j);
           double h_ij1 = GET(h_interp, i, MIN(j + 1, ny - 1));
@@ -384,7 +374,6 @@ int main(int argc, char **argv) {
         }
       }
 
-// update u and v
       #pragma omp target teams distribute
       for (int j = 0; j < ny; j++)
       {
@@ -405,16 +394,10 @@ int main(int argc, char **argv) {
     }
   }
 
-  write_manifest_vtk("water elevation", param.output_eta_filename,
-                     param.dt, nt, param.sampling_rate);
-  // write_manifest_vtk("x velocity", param.output_u_filename,
-  //                    param.dt, nt, param.sampling_rate);
-  // write_manifest_vtk("y velocity", param.output_v_filename,
-  //                    param.dt, nt, param.sampling_rate);
+  write_manifest_vtk("water elevation", param.output_eta_filename, param.dt, nt, param.sampling_rate);
 
   double time = GET_TIME() - start;
-  printf("\nDone: %g seconds (%g MUpdates/s)\n", time,
-         1e-6 * (double)eta->nx * (double)eta->ny * (double)nt / time);
+  printf("\nDone: %g seconds (%g MUpdates/s)\n", time, 1e-6 * (double)eta->nx * (double)eta->ny * (double)nt / time);
 
   free_data(h_interp);
   free_data(eta);
@@ -426,6 +409,5 @@ int main(int argc, char **argv) {
   free(eta);
   free(u);
   free(v);
-
   return 0;
 }
