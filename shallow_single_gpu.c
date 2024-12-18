@@ -43,6 +43,7 @@ struct data {
 
 #define GET(data, i, j) ((data)->values[(data)->nx * (j) + (i)])
 #define SET(data, i, j, val) ((data)->values[(data)->nx * (j) + (i)] = (val))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 static inline int max(const int a, const int b) { return a > b ? a : b;}
 
