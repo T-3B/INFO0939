@@ -205,6 +205,30 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
     return 0;
 }
 
+static int write_manifest_vtk(const char *restrict const filename, const double dt, const int nt, const int sampling_rate) {
+  char out[512];
+  sprintf(out, "%s.pvd", filename);
+  const char *const base_filename = basename((char *)filename);
+
+  FILE *const fp = fopen(out, "wb");
+  if (unlikely(!fp)) {
+    printf("Error: Could not open output VTK manifest file '%s'\n", out);
+    return 1;
+  }
+
+  fprintf(fp, "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\">\n");
+  fprintf(fp, "  <Collection>\n");
+  if (sampling_rate)
+    for (int n = 0; n < nt; n++)
+      if (!(n % sampling_rate))
+        fprintf(fp, "    <DataSet timestep=\"%g\" file='%s_%d.vti'/>\n", n * dt, base_filename, n);
+
+  fprintf(fp, "  </Collection>\n");
+  fprintf(fp, "</VTKFile>\n");
+  fclose(fp);
+  return 0;
+}
+
 void free_data(struct data *data){
   free(data->values);
 }
@@ -322,7 +346,7 @@ int main(int argc, char **argv){
   init_data(v, nx, ny + 1, param.dx, param.dy, 0.0);
   init_data(h_interp, nx, ny, param.dx, param.dy, 0.0);
   const double start = GET_TIME();
-  #pragma omp target data map(to: u[0:1], v[0:1], h_interp[0:1], h[0:1], eta[0:1]){
+  #pragma omp target data map(to: u[0:1], v[0:1], h_interp[0:1], h[0:1], eta[0:1])
     // Interpolate bathymetry using interpolate_data
     interpolate_data(h_interp, h, nx, ny, param.dx, param.dy);
     for (int n = 0; n < nt; n++) {
