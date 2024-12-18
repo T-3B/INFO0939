@@ -355,7 +355,7 @@ int main(int argc, char **argv) {
       else {
         // TODO: add our other sources from the other files
         printf("Error: Unknown source type %d\n", param.source_type);
-        return 1;
+        exit(0);
       }
 
       #pragma omp target teams distribute
