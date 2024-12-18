@@ -241,79 +241,79 @@ void free_data(struct data *data){
   free(data->values);
 }
 
-void interpolate_data(const struct data *h, const struct data *h_interp)
-{
-  #pragma omp target teams distribute
-  for (int j = 0; j < h_interp->ny; j++)
-  {
-    #pragma omp parallel for
-    for (int i = 0; i < h_interp->nx; i++)
-    {
-      int x = i * h_interp->dx;
-      int y = j * h_interp->dy;
+// void interpolate_data(const struct data *h, const struct data *h_interp)
+// {
+//   #pragma omp target teams distribute
+//   for (int j = 0; j < h_interp->ny; j++)
+//   {
+//     #pragma omp parallel for
+//     for (int i = 0; i < h_interp->nx; i++)
+//     {
+//       int x = i * h_interp->dx;
+//       int y = j * h_interp->dy;
 
-      int x_index = (int)(x / h->dx);
-      int y_index = (int)(y / h->dy);
+//       int x_index = (int)(x / h->dx);
+//       int y_index = (int)(y / h->dy);
 
-      if (x_index < 0)
-        x_index = 0;
-      if (x_index >= h->nx - 1)
-        x_index = h->nx - 2; // Ensure we have a valid neighbor
-      if (y_index < 0)
-        y_index = 0;
-      if (y_index >= h->ny - 1)
-        y_index = h->ny - 2;
+//       if (x_index < 0)
+//         x_index = 0;
+//       if (x_index >= h->nx - 1)
+//         x_index = h->nx - 2; // Ensure we have a valid neighbor
+//       if (y_index < 0)
+//         y_index = 0;
+//       if (y_index >= h->ny - 1)
+//         y_index = h->ny - 2;
 
-      double h_kl = GET(h, x_index, y_index);
-      double h_k1l = GET(h, x_index + 1, y_index);
-      double h_kl1 = GET(h, x_index, y_index + 1);
-      double h_k1l1 = GET(h, x_index + 1, y_index + 1);
+//       double h_kl = GET(h, x_index, y_index);
+//       double h_k1l = GET(h, x_index + 1, y_index);
+//       double h_kl1 = GET(h, x_index, y_index + 1);
+//       double h_k1l1 = GET(h, x_index + 1, y_index + 1);
 
-      // Get the four surrounding points
-      double x_k = x_index * h->dx;
-      double x_k1 = (x_index + 1) * h->dx;
-      double y_l = y_index * h->dy;
-      double y_l1 = (y_index + 1) * h->dy;
+//       // Get the four surrounding points
+//       double x_k = x_index * h->dx;
+//       double x_k1 = (x_index + 1) * h->dx;
+//       double y_l = y_index * h->dy;
+//       double y_l1 = (y_index + 1) * h->dy;
 
-      // Bilinear interpolation
-      double denom = (x_k1 - x_k) * (y_l1 - y_l);
-      double h_val = 1.0 / denom * (h_kl * (x_k1 - x) * (y_l1 - y) + h_k1l * (x - x_k) * (y_l1 - y) + h_kl1 * (x_k1 - x) * (y - y_l) + h_k1l1 * (x - x_k) * (y - y_l));
-      SET(h_interp, i, j, h_val);
-    }
-  }
-}
-
-// static void interpolate_data(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
-//     // Trying to explain what i understood :
-//     // -> teams = group of threads working together on a part, so here we divide the computation into multiple teams.
-//     // -> collapse combines loops for better parallel performance.
-//     // -> map to/from: handles data transfer between the CPU and the GPU.
-
-//     // Parallelizing the interpolation calculation
-//     #pragma omp target teams distribute
-//     for (int jj = 0; jj < ny; jj++) {
-//         #pragma omp parallel for
-//         for (int ii = 0; ii < nx; ii++) {
-//             const double y = jj * dy;
-//             int j = (int)(y / data->dy);
-//             const double x = ii * dx;
-//             int i = (int)(x / data->dx);
-//             // Ensure indices are within bounds
-//             if (j < 0) j = 0;
-//             if (j >= data->ny - 1) j = data->ny - 2;
-//             if (i < 0) i = 0;
-//             if (i >= data->nx - 1) i = data->nx - 2;
-//             // Perform bilinear interpolation
-//             const double v00 = GET(data, i, j);
-//             const double v01 = GET(data, i, j + 1);
-//             const double v10 = GET(data, i + 1, j);
-//             const double v11 = GET(data, i + 1, j + 1);
-//             const double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
-//             const double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
-//             SET(interp, ii, jj, v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
-//         }
+//       // Bilinear interpolation
+//       double denom = (x_k1 - x_k) * (y_l1 - y_l);
+//       double h_val = 1.0 / denom * (h_kl * (x_k1 - x) * (y_l1 - y) + h_k1l * (x - x_k) * (y_l1 - y) + h_kl1 * (x_k1 - x) * (y - y_l) + h_k1l1 * (x - x_k) * (y - y_l));
+//       SET(h_interp, i, j, h_val);
 //     }
+//   }
 // }
+
+static void interpolate_data(const struct data *const interp, const struct data *const data, const int nx, const int ny, const double dx, const double dy) {
+    // Trying to explain what i understood :
+    // -> teams = group of threads working together on a part, so here we divide the computation into multiple teams.
+    // -> collapse combines loops for better parallel performance.
+    // -> map to/from: handles data transfer between the CPU and the GPU.
+
+    // Parallelizing the interpolation calculation
+    #pragma omp target teams distribute
+    for (int jj = 0; jj < ny; jj++) {
+        #pragma omp parallel for
+        for (int ii = 0; ii < nx; ii++) {
+            const double y = jj * dy;
+            int j = (int)(y / data->dy);
+            const double x = ii * dx;
+            int i = (int)(x / data->dx);
+            // Ensure indices are within bounds
+            if (j < 0) j = 0;
+            if (j >= data->ny - 1) j = data->ny - 2;
+            if (i < 0) i = 0;
+            if (i >= data->nx - 1) i = data->nx - 2;
+            // Perform bilinear interpolation
+            const double v00 = GET(data, i, j);
+            const double v01 = GET(data, i, j + 1);
+            const double v10 = GET(data, i + 1, j);
+            const double v11 = GET(data, i + 1, j + 1);
+            const double v0 = v00 + ((x - i * data->dx) / data->dx) * (v10 - v00);
+            const double v1 = v01 + ((x - i * data->dx) / data->dx) * (v11 - v01);
+            SET(interp, ii, jj, v0 + ((y - j * data->dy) / data->dy) * (v1 - v0));
+        }
+    }
+}
 
 
 
@@ -370,7 +370,7 @@ int main(int argc, char **argv)
                                 eta[0:1])
   {
 
-    interpolate_data(h, h_interp);
+    interpolate_data(&h_interp, &h, nx, ny, param.dx, param.dy);
 
     for (int n = 0; n < nt; n++)
     {
