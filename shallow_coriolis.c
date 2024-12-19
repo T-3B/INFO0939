@@ -329,8 +329,8 @@ int main(int argc, char **argv)
     for (int i = 0; i < nx; i++) {
       double h_top = GET(&h_interp, i, ny - 1);           
       double c_top = sqrt(param.g * h_top);              
-      double v_top = GET(&v, i, ny - 1);                 
-      double v_second_top = GET(&v, i, ny - 2);           
+      double v_top = GET(&v, i, ny);                 
+      double v_second_top = GET(&v, i, ny - 1);           
       SET(&v, i, ny, v_top - param.dt * c_top * (v_top - v_second_top) / param.dy);
       }
 
@@ -356,8 +356,8 @@ int main(int argc, char **argv)
     for (int j = 0; j < ny; j++) {
       double h_right = GET(&h_interp, nx - 1, j);         
       double c_right = sqrt(param.g * h_right);          
-      double u_right = GET(&u, nx - 1, j);                
-      double u_second_right = GET(&u, nx - 2, j);        
+      double u_right = GET(&u, nx, j);                
+      double u_second_right = GET(&u, nx - 1, j);        
       SET(&u, nx, j, u_right - param.dt * c_right * (u_right - u_second_right) / param.dx);
     }
 
