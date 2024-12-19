@@ -389,8 +389,8 @@ for (int j = 0; j < ny; j++) {
         double eta_imj = GET(&eta, (i == 0) ? 0 : i - 1, j);
         double eta_ijm = GET(&eta, i, (j == 0) ? 0 : j - 1);
 
-	double u_ij_old = GET(&u, i, j)
-	double v_ij_old = GET(&v, i, j)
+	double u_ij_old = GET(&u, i, j);
+	double v_ij_old = GET(&v, i, j);
 	
 
         double u_ij = (1. - c2) * u_ij_old - c1 / param.dx * (eta_ij - eta_imj) + param.dt * f * v_ij_old;
