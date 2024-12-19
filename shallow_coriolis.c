@@ -319,6 +319,12 @@ int main(int argc, char **argv)
       write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
     }
 
+    // To test the ABC (Absorbing boundary condition) generate a pertubation in the middle of the domain.
+    double t = n * param.dt;
+    double A = 5;
+    double f = 1. / 20.;
+    SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
+
     // Top boundary
     for (int i = 0; i < nx; i++) {
       double h_top = GET(&h_interp, i, ny - 1);           
