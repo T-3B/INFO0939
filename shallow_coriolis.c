@@ -321,32 +321,47 @@ int main(int argc, char **argv)
       //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
     }
 
-    // impose boundary conditions
-    double t = n * param.dt;
-    if(param.source_type == 1) {
-      // sinusoidal velocity on top boundary
-      double A = 5;
-      double f = 1. / 20.;
-      for(int i = 0; i < nx; i++) {
-        for(int j = 0; j < ny; j++) {
-          SET(&u, 0, j, 0.);
-          SET(&u, nx, j, 0.);
-          SET(&v, i, 0, 0.);
-          SET(&v, i, ny, A * sin(2 * M_PI * f * t));
-        }
-      }
-    }
-    else if(param.source_type == 2) {
-      // sinusoidal elevation in the middle of the domain
-      double A = 5;
-      double f = 1. / 20.;
-      SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
-    }
-    else {
-      // TODO: add other sources
-      printf("Error: Unknown source type %d\n", param.source_type);
-      exit(0);
-    }
+
+// Top boundary
+  for (int i = 0; i < nx; i++) {
+  	double h_top = GET(&h_interp, i, ny - 1);           // Depth near top boundary
+  	double c_top = sqrt(param.g * h_top);               // Local wave speed
+ 	double v_top = GET(&v, i, ny - 1);                  // Current velocity
+ 	double v_second_top = GET(&v, i, ny - 2);           // Adjacent velocity
+  	SET(&v, i, ny, v_top - param.dt * c_top * (v_top - v_second_top) / param.dy);
+  }
+
+// Bottom boundary
+  for (int i = 0; i < nx; i++) {
+  	double h_bottom = GET(&h_interp, i, 0);             // Depth near bottom boundary
+  	double c_bottom = sqrt(param.g * h_bottom);         // Local wave speed
+  	double v_bottom = GET(&v, i, 0);                    // Current velocity
+  	double v_second_bottom = GET(&v, i, 1);             // Adjacent velocity
+  	SET(&v, i, 0, v_bottom - param.dt * c_bottom * (v_bottom - v_second_bottom) / param.dy);
+   }
+
+  // Left boundary
+for (int j = 0; j < ny; j++) {
+  double h_left = GET(&h_interp, 0, j);               // Depth near left boundary
+  double c_left = sqrt(param.g * h_left);             // Local wave speed
+  double u_left = GET(&u, 0, j);                      // Current velocity
+  double u_second_left = GET(&u, 1, j);               // Adjacent velocity
+  SET(&u, 0, j, u_left - param.dt * c_left * (u_left - u_second_left) / param.dx);
+}
+
+// Right boundary
+for (int j = 0; j < ny; j++) {
+  double h_right = GET(&h_interp, nx - 1, j);         // Depth near right boundary
+  double c_right = sqrt(param.g * h_right);           // Local wave speed
+  double u_right = GET(&u, nx - 1, j);                // Current velocity
+  double u_second_right = GET(&u, nx - 2, j);         // Adjacent velocity
+  SET(&u, nx, j, u_right - param.dt * c_right * (u_right - u_second_right) / param.dx);
+}
+
+
+
+
+
 
     // update eta
     for(int i = 0; i < nx; i++) {
