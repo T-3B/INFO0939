@@ -317,51 +317,43 @@ int main(int argc, char **argv)
     // output solution
     if(param.sampling_rate && !(n % param.sampling_rate)) {
       write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
     }
 
+    // Top boundary
+    for (int i = 0; i < nx; i++) {
+      double h_top = GET(&h_interp, i, ny - 1);           
+      double c_top = sqrt(param.g * h_top);              
+      double v_top = GET(&v, i, ny - 1);                 
+      double v_second_top = GET(&v, i, ny - 2);           
+      SET(&v, i, ny, v_top - param.dt * c_top * (v_top - v_second_top) / param.dy);
+      }
 
-// Top boundary
-  for (int i = 0; i < nx; i++) {
-  	double h_top = GET(&h_interp, i, ny - 1);           // Depth near top boundary
-  	double c_top = sqrt(param.g * h_top);               // Local wave speed
- 	double v_top = GET(&v, i, ny - 1);                  // Current velocity
- 	double v_second_top = GET(&v, i, ny - 2);           // Adjacent velocity
-  	SET(&v, i, ny, v_top - param.dt * c_top * (v_top - v_second_top) / param.dy);
-  }
+    // Bottom boundary
+    for (int i = 0; i < nx; i++) {
+      double h_bottom = GET(&h_interp, i, 0);            
+      double c_bottom = sqrt(param.g * h_bottom);        
+      double v_bottom = GET(&v, i, 0);                    
+      double v_second_bottom = GET(&v, i, 1);            
+      SET(&v, i, 0, v_bottom - param.dt * c_bottom * (v_bottom - v_second_bottom) / param.dy);
+      }
 
-// Bottom boundary
-  for (int i = 0; i < nx; i++) {
-  	double h_bottom = GET(&h_interp, i, 0);             // Depth near bottom boundary
-  	double c_bottom = sqrt(param.g * h_bottom);         // Local wave speed
-  	double v_bottom = GET(&v, i, 0);                    // Current velocity
-  	double v_second_bottom = GET(&v, i, 1);             // Adjacent velocity
-  	SET(&v, i, 0, v_bottom - param.dt * c_bottom * (v_bottom - v_second_bottom) / param.dy);
-   }
+      // Left boundary
+    for (int j = 0; j < ny; j++) {
+      double h_left = GET(&h_interp, 0, j);               
+      double c_left = sqrt(param.g * h_left);             
+      double u_left = GET(&u, 0, j);                      
+      double u_second_left = GET(&u, 1, j);               
+      SET(&u, 0, j, u_left - param.dt * c_left * (u_left - u_second_left) / param.dx);
+    }
 
-  // Left boundary
-for (int j = 0; j < ny; j++) {
-  double h_left = GET(&h_interp, 0, j);               // Depth near left boundary
-  double c_left = sqrt(param.g * h_left);             // Local wave speed
-  double u_left = GET(&u, 0, j);                      // Current velocity
-  double u_second_left = GET(&u, 1, j);               // Adjacent velocity
-  SET(&u, 0, j, u_left - param.dt * c_left * (u_left - u_second_left) / param.dx);
-}
-
-// Right boundary
-for (int j = 0; j < ny; j++) {
-  double h_right = GET(&h_interp, nx - 1, j);         // Depth near right boundary
-  double c_right = sqrt(param.g * h_right);           // Local wave speed
-  double u_right = GET(&u, nx - 1, j);                // Current velocity
-  double u_second_right = GET(&u, nx - 2, j);         // Adjacent velocity
-  SET(&u, nx, j, u_right - param.dt * c_right * (u_right - u_second_right) / param.dx);
-}
-
-
-
-
-
+    // Right boundary
+    for (int j = 0; j < ny; j++) {
+      double h_right = GET(&h_interp, nx - 1, j);         
+      double c_right = sqrt(param.g * h_right);          
+      double u_right = GET(&u, nx - 1, j);                
+      double u_second_right = GET(&u, nx - 2, j);        
+      SET(&u, nx, j, u_right - param.dt * c_right * (u_right - u_second_right) / param.dx);
+    }
 
     // update eta
     for(int i = 0; i < nx; i++) {
@@ -381,21 +373,14 @@ for (int j = 0; j < ny; j++) {
       for(int j = 0; j < ny; j++) {
         double c1 = param.dt * param.g;
         double c2 = param.dt * param.gamma;
-	double f = 3.775e-5; // Coriolis parameter at 15° latitude (in s^-1) -> calcul 	       in the note 
-
-
-
+	      double f = 3.775e-5; // Coriolis parameter at 15° latitude (in s^-1) -> calcul 	       in the note 
         double eta_ij = GET(&eta, i, j);
         double eta_imj = GET(&eta, (i == 0) ? 0 : i - 1, j);
         double eta_ijm = GET(&eta, i, (j == 0) ? 0 : j - 1);
-
-	double u_ij_old = GET(&u, i, j);
-	double v_ij_old = GET(&v, i, j);
-	
-
+        double u_ij_old = GET(&u, i, j);
+	      double v_ij_old = GET(&v, i, j);
         double u_ij = (1. - c2) * u_ij_old - c1 / param.dx * (eta_ij - eta_imj) + param.dt * f * v_ij_old;
-	SET(&u, i, j, u_ij);
-
+	      SET(&u, i, j, u_ij);
         double v_ij = (1. - c2) * v_ij_old - c1 / param.dy * (eta_ij - eta_ijm) - param.dt * f * u_ij_old;
         SET(&v, i, j, v_ij);
       }
@@ -405,11 +390,6 @@ for (int j = 0; j < ny; j++) {
 
   write_manifest_vtk(param.output_eta_filename, param.dt, nt,
                      param.sampling_rate);
-  //write_manifest_vtk(param.output_u_filename, param.dt, nt,
-  //                   param.sampling_rate);
-  //write_manifest_vtk(param.output_v_filename, param.dt, nt,
-  //                   param.sampling_rate);
-
   double time = GET_TIME() - start;
   printf("\nDone: %g seconds (%g MUpdates/s)\n", time,
          1e-6 * (double)eta.nx * (double)eta.ny * (double)nt / time);
