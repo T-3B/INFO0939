@@ -311,6 +311,9 @@ int main(int argc, char **argv)
 
     interpolate_data(h_interp, h, nx, ny, param.dx, param.dy);
 
+    const double c1 = param.dt * param.g;
+    const double c2 = param.dt * param.gamma;
+
     for (int n = 0; n < nt; n++) {
       if (n && (n % (nt / 10)) == 0) {
         double time_sofar = GET_TIME() - start;
@@ -352,18 +355,13 @@ int main(int argc, char **argv)
       }
 
       #pragma omp target teams distribute
-      for (int j = 0; j < ny; j++)
-      {
+      for (int j = 0; j < ny; j++) {
         #pragma omp parallel for
-        for (int i = 0; i < nx; i++)
-        {
-          double h_ij = GET(h_interp, i, j);
-          double h_i1j = GET(h_interp, MIN(i + 1, nx - 1), j);
-          double h_ij1 = GET(h_interp, i, MIN(j + 1, ny - 1));
-          double c0 = param.dt * h_ij;
-          double c1 = param.dt * h_i1j;
-          double c2 = param.dt * h_ij1;
-          double eta_ij = GET(eta, i, j) - (c1 * GET(u, i + 1, j) - c0 * GET(u, i, j)) / param.dx - (c2 * GET(v, i, j + 1) - c0 * GET(v, i, j)) / param.dy;
+        for (int i = 0; i < nx; i++) {
+          const double h_ij = GET(h_interp, i, j), u_ij = GET(u, i, j), v_ij = GET(v, i, j);
+          const double eta_ij = GET(eta, i, j) - param.dt * (
+            (GET(h_interp, i + 1, j) * GET(u, i + 1, j) - h_ij * u_ij) / param.dx
+            + (GET(h_interp, i, j + 1) * GET(v, i, j + 1) - h_ij * v_ij) / param.dy);
           SET(eta, i, j, eta_ij);
         }
       }
@@ -371,15 +369,12 @@ int main(int argc, char **argv)
       for (int j = 0; j < ny; j++) {
         #pragma omp parallel for
         for (int i = 0; i < nx; i++) {
-          double u_ij = GET(u, i, j);
-          double v_ij = GET(v, i, j);
-          double c3 = param.dt * param.g;
-          double c4 = param.dt * param.gamma;
-          double eta_ij = GET(eta, i, j);
-          double eta_imj = GET(eta, (i == 0) ? 0 : i - 1, j);
-          double eta_ijm = GET(eta, i, (j == 0) ? 0 : j - 1);
-          u_ij = (1. - c4) * u_ij - c3 / param.dx * (eta_ij - eta_imj) + param.dt * CORIOLIS_PARAM * v_ij;
-          v_ij = (1. - c4) * v_ij - c3 / param.dy * (eta_ij - eta_ijm) - param.dt * CORIOLIS_PARAM * u_ij;
+          const double eta_ij = GET(eta, i, j);
+          double u_ij = GET(u, i, j), v_ij = GET(v, i, j);
+          const double eta_imj = i ? GET(eta, i - 1, j) : eta_ij;
+          const double eta_ijm = j ? GET(eta, i, j - 1) : eta_ij;
+          u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj) + param.dt * CORIOLIS_PARAM * v_ij;
+          v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm) - param.dt * CORIOLIS_PARAM * u_ij;
           SET(u, i, j, u_ij);
           SET(v, i, j, v_ij);
         }
