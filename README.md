@@ -9,3 +9,5 @@ To test this project, a simple `make -j` will build all targets, that are:
 - gpu
 
 Note that we chose to implement transparent boundary conditions (available with `param.source_type = 3`) and Coriolis forces (used on every `param.source_type`).
+
+We also decided to look at large simulations with realistic bathymetry files, that we will talk about in the future presentation.
