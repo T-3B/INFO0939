@@ -371,13 +371,15 @@ int main(int argc, char **argv)
       for (int j = 0; j < ny; j++) {
         #pragma omp parallel for
         for (int i = 0; i < nx; i++) {
+          double u_ij = GET(u, i, j);
+          double v_ij = GET(v, i, j);
           double c3 = param.dt * param.g;
           double c4 = param.dt * param.gamma;
           double eta_ij = GET(eta, i, j);
           double eta_imj = GET(eta, (i == 0) ? 0 : i - 1, j);
           double eta_ijm = GET(eta, i, (j == 0) ? 0 : j - 1);
-          double u_ij = (1. - c4) * GET(u, i, j) - c3 / param.dx * (eta_ij - eta_imj);
-          double v_ij = (1. - c4) * GET(v, i, j) - c3 / param.dy * (eta_ij - eta_ijm);
+          u_ij = (1. - c4) * u_ij - c3 / param.dx * (eta_ij - eta_imj) + param.dt * CORIOLIS_PARAM * v_ij;
+          v_ij = (1. - c4) * v_ij - c3 / param.dy * (eta_ij - eta_ijm) - param.dt * CORIOLIS_PARAM * u_ij;
           SET(u, i, j, u_ij);
           SET(v, i, j, v_ij);
         }
