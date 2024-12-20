@@ -11,6 +11,7 @@
 #define likely(x) __builtin_expect((x), 1)
 #define AMP 5
 #define FREQ (1./20.)
+#define CORIOLIS_PARAM 3.775e-5  // Coriolis parameter at 15° latitude (in s^-1) -> calcul 	       in the note 
 
 #ifdef _OPENMP
 # include <omp.h>
@@ -255,13 +256,14 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
   data->ny = ny;
   data->dx = dx;
   data->dy = dy;
-  data->values = malloc(nx * ny * sizeof(double));
+  data->values = val != 0. ? malloc(nx * ny * sizeof(double)) : calloc(nx * ny, sizeof(double));
   if (unlikely(!data->values)){
     printf("Error: Could not allocate data\n");
     return 1;
   }
-  for (unsigned i = nx * ny; i--;)
-    data->values[i] = val;
+  if (val != 0.)
+    for (unsigned i = nx * ny; i--;)
+      data->values[i] = val;
   return 0;
 }
 
@@ -340,9 +342,13 @@ int main(int argc, char **argv) {
   for (int j = 0, idx = 0; j < subsizes[1]; j++)
     for (int i = 0; i < subsizes[0]; i++, idx++)
       h.values[idx] = GET(&h, i + hx_offset, j + hy_offset);
+  const int nx_total = floor(h.nx * h.dx / param.dx), ny_total = floor(h.ny * h.dy / param.dy);
   h.nx = subsizes[0];
   h.ny = subsizes[1];
   if (unlikely(!(h.values = realloc(h.values, h.nx * h.ny * sizeof *h.values)))) ABORT();
+#else
+  const _Bool has_left_neighbor = 0, has_right_neighbor = 0, has_down_neighbor = 0, has_up_neighbor = 0;
+  const int nx_offset = 0, ny_offset = 0;
 #endif
 
   // infer size of domain from input elevation data
@@ -356,11 +362,12 @@ int main(int argc, char **argv) {
   checkMPISuccess(MPI_Type_create_resized(vertical_ghost_cells, 0, (nx + 1) * sizeof(double), &vertical_ghost_cells));
   checkMPISuccess(MPI_Type_commit(&vertical_ghost_cells));
   if (!rank) {
-    printf(" - %dx%d divided into %dx%d subdomains each of grid size: %g m x %g m (%d x %d = %d grid points)\n", nx * dims[0], ny * dims[1], dims[0], dims[1], hx, hy, nx, ny, nx * ny);
+    printf(" - %dx%d divided into %dx%d subdomains; grid size of rank 0: %g m x %g m (%d x %d = %d grid points)\n", nx_total, ny_total, dims[0], dims[1], hx, hy, nx, ny, nx * ny);
     printf(" - number of time steps: %d\n", nt);
   }
   const _Bool is_using_mpi = 1;
 #else
+  const int nx_total = nx, ny_total = ny;
   print_parameters(&param);
   printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n", hx, hy, nx, ny, nx * ny);
   printf(" - number of time steps: %d\n", nt);
@@ -385,7 +392,12 @@ int main(int argc, char **argv) {
 
     // output solution
     if (param.sampling_rate && !(n % param.sampling_rate)) {
-#ifdef USE_MPI
+#ifndef USE_MPI
+      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
+      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
+    }
+#else
       struct data eta_without_ghost;
       init_data(&eta_without_ghost, nx, ny, param.dx, param.dy, 0.);
       for (int i = 1; i < nx + 1; i++)
@@ -399,25 +411,24 @@ int main(int argc, char **argv) {
     }
     if (n)
       checkMPISuccess(MPI_Waitall(4, requests, MPI_STATUSES_IGNORE));
-    #pragma omp parallel for
-    for (int j = 0; j < ny; j++) {
+    /*
+     * Now that we have received ghost cells, we need to update boundaries (for u & v: only between MPI ranks, the "outside" boundaries will be updated from transparent boundaries)
+     */
+    for (int j = 0; j < ny; j++) {  // update eta
       for (int i = 0; i < nx; i += i || !j || j == ny - 1 ? 1 : nx - 1) {
-        // update eta
-        const double h_ij = GET(&h_interp, i, j);
-        double u_ij = GET(&u, i, j);
-        double v_ij = GET(&v, i, j);
+        const double h_ij = GET(&h_interp, i, j), u_ij = GET(&u, i, j), v_ij = GET(&v, i, j);
         const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi) - param.dt * (
           (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
           + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
         SET(&eta, i + is_using_mpi, j + is_using_mpi, eta_ij);
-
-        // update u and v
-        const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
-        const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
-        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
-        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
-        SET(&u, i, j, u_ij);
-        SET(&v, i, j, v_ij);
+        if (param.source_type != 3 || !(!has_left_neighbor && i == 0)) {
+          const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
+          SET(&u, i, j, (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj) + param.dt * CORIOLIS_PARAM * v_ij);
+        }
+        if (param.source_type != 3 || !(!has_down_neighbor && j == 0)) {
+          const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
+          SET(&v, i, j, (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm) - param.dt * CORIOLIS_PARAM * u_ij);
+        }
       }
     }
     checkMPISuccess(MPI_Isendrecv(&GET(&u, 0, 0), 1, vertical_ghost_cells, neighbors[LEFT], 0,
@@ -428,6 +439,8 @@ int main(int argc, char **argv) {
                                  &GET(&v, 0, ny), nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, &requests[2]));
     checkMPISuccess(MPI_Isendrecv(&GET(&eta, 1, ny), nx, MPI_DOUBLE, neighbors[UP], 0,
                                  &GET(&eta, 1, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, &requests[3]));
+#endif
+
     // impose boundary conditions
     const double t = n * param.dt;
     if (param.source_type == 1) {  // sinusoidal velocity on top boundary
@@ -440,42 +453,38 @@ int main(int argc, char **argv) {
         if (!has_up_neighbor) SET(&v, i, ny, AMP * sin(2 * M_PI * FREQ * t));
       }
     } else if (param.source_type == 2) {  // sinusoidal elevation in the middle of the subdomain of one MPI rank
-      if (coords[0] == dims[0] / 2 && coords[1] == dims[1] / 2) SET(&eta, nx / 2, ny / 2, AMP * sin(2 * M_PI * FREQ * t));
+      const int nx_middle = nx_total / 2 - nx_offset, ny_middle = ny_total / 2 - ny_offset;
+      if (0 <= nx_middle && nx_middle < nx && 0 <= ny_middle && ny_middle < ny)
+        SET(&eta, nx_middle + is_using_mpi, ny_middle + is_using_mpi, AMP * sin(2 * M_PI * FREQ * t));
+    } else if (param.source_type == 3) {  // same as source_type == 2, but transparent boundaries
+      const int nx_middle = nx_total / 2 - nx_offset, ny_middle = ny_total / 2 - ny_offset;
+      if (0 <= nx_middle && nx_middle < nx && 0 <= ny_middle && ny_middle < ny)
+        SET(&eta, nx_middle + is_using_mpi, ny_middle + is_using_mpi, AMP * sin(2 * M_PI * FREQ * t));
+
+      for (int i = nx; i--;) {
+        if (!has_up_neighbor) {
+          const double v_top = GET(&v, i, ny);
+          SET(&v, i, ny, v_top - param.dt * sqrt(param.g * GET(&h_interp, i, ny)) * (v_top - GET(&v, i, ny - 1)) / param.dy);
+        }
+        if (!has_down_neighbor) {
+          const double v_bottom = GET(&v, i, 0);
+          SET(&v, i, 0, v_bottom - param.dt * sqrt(param.g * GET(&h_interp, i, 0)) * (v_bottom - GET(&v, i, 1)) / param.dy);
+        }
+      }
+      for (int j = ny; j--;) {
+        if (!has_left_neighbor) {
+          const double u_left = GET(&u, 0, j);
+          SET(&u, 0, j, u_left - param.dt * sqrt(param.g * GET(&h_interp, 0, j)) * (u_left - GET(&u, 1, j)) / param.dx);
+        }
+        if (!has_right_neighbor) {
+          const double u_right = GET(&u, nx, j);
+          SET(&u, nx, j, u_right - param.dt * sqrt(param.g * GET(&h_interp, nx, j)) * (u_right - GET(&u, nx - 1, j)) / param.dx);
+        }
+      }
     } else {
-      // TODO: add other sources
       printf("Error: Unknown source type %d\n", param.source_type);
       ABORT();
     }
-#else
-      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
-    }
-    // impose boundary conditions
-    const double t = n * param.dt;
-    if (param.source_type == 1) {
-      // sinusoidal velocity on top boundary
-      const double A = 5;
-      const double f = 1. / 20.;
-      for (unsigned i = ny; i--;) {  // CHANGED (question 4)
-        SET(&u, 0, i, 0.);
-        SET(&u, nx, i, 0.);
-      }
-      for (unsigned i = nx; i--;) {
-        SET(&v, i, 0, 0.);
-        SET(&v, i, ny, A * sin(2 * M_PI * f * t));
-      }
-    } else if (param.source_type == 2) {
-      // sinusoidal elevation in the middle of the domain
-      const double A = 5;
-      const double f = 1. / 20.;
-      SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
-    } else {
-      // TODO: add other sources
-      printf("Error: Unknown source type %d\n", param.source_type);
-      ABORT();
-    }
-#endif
 
     if (!rank && n && (n % (nt / 10)) == 0) {
       const double time_sofar = GET_TIME() - start;
@@ -484,30 +493,32 @@ int main(int argc, char **argv) {
       fflush(stdout);
     }
 
-    #pragma omp parallel for
+    #pragma omp parallel for  // update eta
     for (int j = is_using_mpi; j < ny-is_using_mpi; j++) {  // CHANGED (question 4)
-      for (int i = is_using_mpi; i < nx -is_using_mpi; i++) {
-        // update eta
+      for (int i = is_using_mpi; i < nx-is_using_mpi; i++) {
         const double h_ij = GET(&h_interp, i, j);
-        double u_ij = GET(&u, i, j);
-        double v_ij = GET(&v, i, j);
+        const double u_ij = GET(&u, i, j);
+        const double v_ij = GET(&v, i, j);
         const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi) - param.dt * (
           (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
           + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
         SET(&eta, i + is_using_mpi, j + is_using_mpi, eta_ij);
-
-        // update u and v
+      }
+    }
+    #pragma omp parallel for  // update u and v
+    for (int j = is_using_mpi; j < ny-is_using_mpi; j++) {  // CHANGED (question 4)
+      for (int i = is_using_mpi; i < nx-is_using_mpi; i++) {
+        double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi);
+        double u_ij = GET(&u, i, j);
+        double v_ij = GET(&v, i, j);
         const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
         const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
-        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj);
-        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm);
+        u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj) + param.dt * CORIOLIS_PARAM * v_ij;
+        v_ij = (1. - c2) * v_ij - c1 / param.dy * (eta_ij - eta_ijm) - param.dt * CORIOLIS_PARAM * u_ij;
         SET(&u, i, j, u_ij);
         SET(&v, i, j, v_ij);
       }
     }
-#ifdef USE_MPI
-    
-#endif
   }
 #ifdef USE_MPI
   if (!rank) {
