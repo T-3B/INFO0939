@@ -11,7 +11,7 @@
 #define likely(x) __builtin_expect((x), 1)
 #define AMP 5
 #define FREQ (1./20.)
-#define CORIOLIS_PARAM 3.775e-5  // Coriolis parameter at 15° latitude (in s^-1) -> calcul 	       in the note 
+#define CORIOLIS_PARAM 3.775e-5  // Coriolis parameter at 15° latitude (in s^-1) -> calcul 	       in the note
 
 #ifdef _OPENMP
 # include <omp.h>
@@ -496,9 +496,7 @@ int main(int argc, char **argv) {
     #pragma omp parallel for  // update eta
     for (int j = is_using_mpi; j < ny-is_using_mpi; j++) {  // CHANGED (question 4)
       for (int i = is_using_mpi; i < nx-is_using_mpi; i++) {
-        const double h_ij = GET(&h_interp, i, j);
-        const double u_ij = GET(&u, i, j);
-        const double v_ij = GET(&v, i, j);
+        const double h_ij = GET(&h_interp, i, j), u_ij = GET(&u, i, j), v_ij = GET(&v, i, j);
         const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi) - param.dt * (
           (GET(&h_interp, i + 1, j) * GET(&u, i + 1, j) - h_ij * u_ij) / param.dx
           + (GET(&h_interp, i, j + 1) * GET(&v, i, j + 1) - h_ij * v_ij) / param.dy);
@@ -508,9 +506,8 @@ int main(int argc, char **argv) {
     #pragma omp parallel for  // update u and v
     for (int j = is_using_mpi; j < ny-is_using_mpi; j++) {  // CHANGED (question 4)
       for (int i = is_using_mpi; i < nx-is_using_mpi; i++) {
-        double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi);
-        double u_ij = GET(&u, i, j);
-        double v_ij = GET(&v, i, j);
+        const double eta_ij = GET(&eta, i + is_using_mpi, j + is_using_mpi);
+        double u_ij = GET(&u, i, j), v_ij = GET(&v, i, j);
         const double eta_imj = (i + is_using_mpi) ? GET(&eta, i - 1 + is_using_mpi, j + is_using_mpi) : eta_ij;
         const double eta_ijm = (j + is_using_mpi) ? GET(&eta, i + is_using_mpi, j - 1 + is_using_mpi) : eta_ij;
         u_ij = (1. - c2) * u_ij - c1 / param.dx * (eta_ij - eta_imj) + param.dt * CORIOLIS_PARAM * v_ij;
