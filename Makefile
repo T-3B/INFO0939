@@ -4,15 +4,17 @@ CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas -Wno-u
 LDLIBS	= -lm
 MPICC	= mpicc -DUSE_MPI
 OMP		= -fopenmp
+GPU		= -fopenmp -fopenmp-targets=nvptx64-nvidia-cuda
 SRC		= shallow.c
+SRCGPU	= shallow_gpu.c
 TARGET	= shallow
 
 export OMPI_CC
 
-all: omp_mpi mpi omp serial
+all: mpi_omp mpi omp serial gpu
 
-omp_mpi: $(TARGET)
-$(TARGET): $(SRC)
+mpi_omp: $(TARGET)_mpi_omp
+$(TARGET)_mpi_omp: $(SRC)
 	$(MPICC) $(CFLAGS) $(OMP) -o $@ $^ $(LDLIBS)
 
 mpi: $(TARGET)_mpi
@@ -27,6 +29,10 @@ serial: $(TARGET)_serial
 $(TARGET)_serial: $(SRC)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
+gpu: $(TARGET)_gpu
+$(TARGET)_gpu: $(SRCGPU)
+	$(CC) $(CFLAGS) $(GPU) -o $@ $^ $(LDLIBS)
+
 .PHONY: clean
 clean:
-	rm -f $(TARGET) $(TARGET)_mpi $(TARGET)_omp $(TARGET)_serial
+	rm -f $(TARGET) $(TARGET)_mpi $(TARGET)_omp $(TARGET)_serial $(TARGET)_gpu
