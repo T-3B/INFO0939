@@ -35,4 +35,4 @@ $(TARGET)_gpu: $(SRCGPU)
 
 .PHONY: clean
 clean:
-	rm -f $(TARGET) $(TARGET)_mpi $(TARGET)_omp $(TARGET)_serial $(TARGET)_gpu
+	rm -f $(TARGET)_mpi_omp $(TARGET)_mpi $(TARGET)_omp $(TARGET)_serial $(TARGET)_gpu
