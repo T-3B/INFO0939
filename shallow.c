@@ -431,14 +431,14 @@ int main(int argc, char **argv) {
         }
       }
     }
-    checkMPISuccess(MPI_Isendrecv(&GET(&u, 0, 0), 1, vertical_ghost_cells, neighbors[LEFT], 0,
-                                 &GET(&u, nx, 0), 1, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, &requests[0]));
-    checkMPISuccess(MPI_Isendrecv(&GET(&eta, nx, 1), 1, vertical_ghost_cells, neighbors[RIGHT], 0,
-                                 &GET(&eta, 0, 1), 1, vertical_ghost_cells, neighbors[LEFT], 0, cart_comm, &requests[1]));
-    checkMPISuccess(MPI_Isendrecv(&GET(&v, 0, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0,
-                                 &GET(&v, 0, ny), nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, &requests[2]));
-    checkMPISuccess(MPI_Isendrecv(&GET(&eta, 1, ny), nx, MPI_DOUBLE, neighbors[UP], 0,
-                                 &GET(&eta, 1, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, &requests[3]));
+    checkMPISuccess(MPI_Isend(&GET(&u, 0, 0), 1, vertical_ghost_cells, neighbors[LEFT], 0, cart_comm, &requests[0]));
+    checkMPISuccess(MPI_Irecv(&GET(&u, nx, 0), 1, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, &requests[0]));
+    checkMPISuccess(MPI_Isend(&GET(&eta, nx, 1), 1, vertical_ghost_cells, neighbors[RIGHT], 0, cart_comm, &requests[1]));
+    checkMPISuccess(MPI_Irecv(&GET(&eta, 0, 1), 1, vertical_ghost_cells, neighbors[LEFT], 0, cart_comm, &requests[1]));
+    checkMPISuccess(MPI_Isend(&GET(&v, 0, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, &requests[2]));
+    checkMPISuccess(MPI_Irecv(&GET(&v, 0, ny), nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, &requests[2]));
+    checkMPISuccess(MPI_Isend(&GET(&eta, 1, ny), nx, MPI_DOUBLE, neighbors[UP], 0, cart_comm, &requests[3]));
+    checkMPISuccess(MPI_Irecv(&GET(&eta, 1, 0), nx, MPI_DOUBLE, neighbors[DOWN], 0, cart_comm, &requests[3]));
 #endif
 
     // impose boundary conditions
