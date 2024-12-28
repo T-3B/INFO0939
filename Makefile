@@ -1,6 +1,6 @@
 CC		= clang
 OMPI_CC	= $(CC)
-CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu23 -Wno-unknown-pragmas -Wno-unused-function
+CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu2x -Wno-unknown-pragmas -Wno-unused-function
 LDLIBS	= -lm
 MPICC	= mpicc -DUSE_MPI
 OMP		= -fopenmp
