@@ -12,7 +12,7 @@ module load GCC
 
 MAX_THREADS="${SLURM_CPUS_ON_NODE}"
 EXE=" $(realpath ./shallow_omp)"
-EXE_ARGS="$(realpath ./example_inputs/single/param_simple.txt)"
+EXE_ARGS="$(realpath ./example_inputs/simple/param_simple.txt)"
 
 echo ""
 echo " Strong scaling experiment start (OpenMP)"
