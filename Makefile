@@ -1,4 +1,4 @@
-CC		= clang
+CC		= gcc
 OMPI_CC	= $(CC)
 CFLAGS	= -O3 -flto -march=native -Wall -s -std=gnu2x -Wno-unknown-pragmas -Wno-unused-function
 LDLIBS	= -lm
