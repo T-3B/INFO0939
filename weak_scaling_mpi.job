@@ -13,7 +13,7 @@ module load OpenMPI
 MIN_RANKS=${SLURM_NNODES}
 MAX_RANKS=$((SLURM_CPUS_ON_NODE * SLURM_NNODES))
 EXE="$(realpath ./shallow_mpi)"
-EXE_ARGS="example_inputs/simple/param_simple.txt"
+EXE_ARGS="$(realpath ./example_inputs/simple/param_simple.txt)"
 
 echo ""
 echo " Weak scaling experiment start (MPI)"
@@ -50,11 +50,10 @@ for BIND in close spread; do
     OUTPUT_FILE=$(basename ${EXE})-${NRANKS}ranks.out
 
     mkdir -p ${OUTPUT_DIR}
-    pushd ${OUTPUT_DIR} &> /dev/null
 
-    /usr/bin/time -f '%e' -o 'time.out' srun ${SRUN_OPTS} ${EXE} ${EXE_ARGS}_${NRANKS} > ${OUTPUT_FILE}
+    /usr/bin/time -f '%e' -o 'time.out' srun ${SRUN_OPTS} ${EXE} ${EXE_ARGS}_${NRANKS} > ${OUTPUT_DIR}/${OUTPUT_FILE}
 
-    TIME_FROM_OUTPUT=$(sed -n -E 's/CPU Time: (.*) sec/\1/p' ${OUTPUT_FILE})
+    TIME_FROM_OUTPUT=$(sed -n -E 's/CPU Time: (.*) sec/\1/p' ${OUTPUT_DIR}/${OUTPUT_FILE})
     TIME_FROM_TIME_CMD=$(cat time.out)
 
     printf " | %10s | %15.3f | %19.3f |\n" ${NRANKS} ${TIME_FROM_OUTPUT} ${TIME_FROM_TIME_CMD}

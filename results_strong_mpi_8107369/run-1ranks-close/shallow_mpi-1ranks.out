@@ -1,0 +1,24 @@
+Parameters:
+ - grid spacing (dx, dy): 2 m, 2 m
+ - time step (dt): 0.05 s
+ - maximum time (max_t): 2500 s
+ - gravitational acceleration (g): 9.81 m/s^2
+ - dissipation coefficient (gamma): 2e-05 1/s
+ - source type: 1
+ - sampling rate: 0
+ - input bathymetry (h) file: 'example_inputs/simple/h_simple.dat'
+ - output elevation (eta) file: 'example_inputs/simple/output/eta_simple'
+ - output velocity (u, v) files: 'example_inputs/simple/output/u_simple', 'example_inputs/simple/output/v_simple'
+ - 2000x2000 divided into 1x1 subdomains; grid size of rank 0: 4000 m x 4000 m (2000 x 2000 = 4000000 grid points)
+ - number of time steps: 50000
+Computing step 5000/50000 (ETA: 480.004 seconds)
+Computing step 10000/50000 (ETA: 419.918 seconds)
+Computing step 15000/50000 (ETA: 363.122 seconds)
+Computing step 20000/50000 (ETA: 309.315 seconds)
+Computing step 25000/50000 (ETA: 256.821 seconds)
+Computing step 30000/50000 (ETA: 204.951 seconds)
+Computing step 35000/50000 (ETA: 153.435 seconds)
+Computing step 40000/50000 (ETA: 102.16 seconds)
+Computing step 45000/50000 (ETA: 51.0244 seconds)
+Error: Could not open output VTK manifest file 'example_inputs/simple/output/eta_simple.pvd'
+Done: 509.826 seconds (392.683 MUpdates/s)

@@ -1,0 +1,26 @@
+Parameters:
+ - grid spacing (dx, dy): 0.625 m, 0.625 m
+ - time step (dt): 0.05 s
+ - maximum time (max_t): 600 s
+ - gravitational acceleration (g): 9.81 m/s^2
+ - dissipation coefficient (gamma): 2e-05 1/s
+ - source type: 1
+ - sampling rate: 0
+ - input bathymetry (h) file: 'example_inputs/simple/h_simple.dat'
+ - output elevation (eta) file: 'example_inputs/simple/output/eta_simple'
+ - output velocity (u, v) files: 'example_inputs/simple/output/u_simple', 'example_inputs/simple/output/v_simple'
+ - 6400x6400 divided into 4x4 subdomains; grid size of rank 0: 1000 m x 1000 m (1600 x 1600 = 2560000 grid points)
+ - number of time steps: 12000
+Computing step 1200/12000 (ETA: 133.846 seconds)
+Computing step 2400/12000 (ETA: 119.011 seconds)
+Computing step 3600/12000 (ETA: 104.251 seconds)
+Computing step 4800/12000 (ETA: 89.665 seconds)
+Computing step 6000/12000 (ETA: 75.4603 seconds)
+Computing step 7200/12000 (ETA: 60.2506 seconds)
+Computing step 8400/12000 (ETA: 48.6512 seconds)
+Computing step 9600/12000 (ETA: 32.1761 seconds)
+Computing step 10800/12000 (ETA: 15.9547 seconds)
+[1736258564.006459] [nic5-w072:2892867:0]          rcache.c:591  UCX  WARN  mlx5_0: destroying inuse region 0x14f3010 [0x148cd8ec2210..0x148cd8ec5420] g- rw ref 1 lkey 0x16d8581 rkey 0x16d8581 atomic_rkey 0xffffffff
+[1736258564.006875] [nic5-w072:2892868:0]          rcache.c:591  UCX  WARN  mlx5_0: destroying inuse region 0x2586240 [0x14e67e05f210..0x14e67e062420] g- rw ref 1 lkey 0x24334d rkey 0x24334d atomic_rkey 0xffffffff
+Error: Could not open output VTK manifest file 'example_inputs/simple/output/eta_simple.pvd'
+Done: 158.503 seconds (194.056 MUpdates/s)

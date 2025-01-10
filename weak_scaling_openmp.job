@@ -41,11 +41,9 @@ for OMP_BIND in close spread; do
     OUTPUT_FILE=$(basename ${EXE})-${NTHREADS}threads.out
 
     mkdir -p ${OUTPUT_DIR}
-    pushd ${OUTPUT_DIR} &> /dev/null
 
-    /usr/bin/time -f '%e' -o 'time.out' ${EXE} ${EXE_ARGS}_${NTHREADS} > ${OUTPUT_FILE}
-
-    TIME_FROM_OUTPUT=$(sed -n -E 's/CPU Time: (.*) sec/\1/p' ${OUTPUT_FILE})
+    /usr/bin/time -f '%e' -o 'time.out' ${EXE} ${EXE_ARGS}_${NTHREADS} > ${OUTPUT_DIR}/${OUTPUT_FILE}
+    TIME_FROM_OUTPUT=$(sed -n -E 's/CPU Time: (.*) sec/\1/p' ${OUTPUT_DIR}/${OUTPUT_FILE})
     TIME_FROM_TIME_CMD=$(cat time.out)
 
     printf " | %12s | %15.3f | %19.3f |\n" ${NTHREADS} ${TIME_FROM_OUTPUT} ${TIME_FROM_TIME_CMD}

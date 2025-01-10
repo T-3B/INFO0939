@@ -5,7 +5,7 @@
 9.81
 2e-5
 1
-100
+0
 example_inputs/simple/h_simple.dat
 example_inputs/simple/output/eta_simple
 example_inputs/simple/output/u_simple

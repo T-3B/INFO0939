@@ -1,0 +1,64 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) releases/2021b   2) tis/2018.01
+
+ Strong scaling experiment start (MPI)
+ -------------------------------------
+      Time: Tue Jan  7 11:38:26 CET 2025
+    Job id: 8107369
+     Nodes: nic5-w073
+ Max ranks: 64
+ ------------------------------------
+
+/home/users/j/h/jhansen/hpc/shallow_mpi /home/users/j/h/jhansen/hpc/example_inputs/simple/param_simple.txt
+
+ +----------------------------------------------------+
+ | Strong scaling with processes  close               |
+ +------------+-----------------+---------------------+
+ | Num. ranks | Time (from app) | Time (time command) |
+ +------------+-----------------+---------------------+
+1 511.46
+ |          1 |         511.460 |               0.000 |
+2 269.81
+ |          2 |         269.810 |               0.000 |
+4 238.01
+ |          4 |         238.010 |               0.000 |
+8 240.10
+ |          8 |         240.100 |               0.000 |
+16 224.62
+ |         16 |         224.620 |               0.000 |
+32 26.03
+ |         32 |          26.030 |               0.000 |
+64 9.45
+ |         64 |           9.450 |               0.000 |
+ +------------+-----------------+---------------------+
+
+/home/users/j/h/jhansen/hpc/shallow_mpi /home/users/j/h/jhansen/hpc/example_inputs/simple/param_simple.txt
+
+ +----------------------------------------------------+
+ | Strong scaling with processes spread               |
+ +------------+-----------------+---------------------+
+ | Num. ranks | Time (from app) | Time (time command) |
+ +------------+-----------------+---------------------+
+1 515.90
+ |          1 |         515.900 |               0.000 |
+2 271.69
+ |          2 |         271.690 |               0.000 |
+4 134.30
+ |          4 |         134.300 |               0.000 |
+8 46.63
+ |          8 |          46.630 |               0.000 |
+16 23.03
+ |         16 |          23.030 |               0.000 |
+32 14.24
+ |         32 |          14.240 |               0.000 |
+64 9.44
+ |         64 |           9.440 |               0.000 |
+ +------------+-----------------+---------------------+
+
+
+ -----------------------------
+ End Time: Tue Jan  7 12:20:41 CET 2025
+ -----------------------------
+ Strong scaling experiment end

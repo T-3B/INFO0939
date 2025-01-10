@@ -1,7 +1,7 @@
 #!/bin/bash
-#
+#SBATCH --cpus-per-task=64
 #SBATCH --exclusive
-#SBATCH --partition=hmem
+#SBATCH --partition=batch
 #SBATCH --output=job_output_strong_openmp_%j.out
 #SBATCH --time=01:00:00
 #SBATCH --nodes=1
@@ -10,10 +10,10 @@
 module purge
 module load GCC
 
-MAX_THREADS="${SLURM_CPUS_ON_NODE}"
+MAX_THREADS="64"
 EXE=" $(realpath ./shallow_omp)"
 EXE_ARGS="$(realpath ./example_inputs/simple/param_simple.txt)"
-
+echo $SLURM_CPUS_ON_NODE
 echo ""
 echo " Strong scaling experiment start (OpenMP)"
 echo " ----------------------------------------"
@@ -43,8 +43,7 @@ for OMP_BIND in close spread; do
     mkdir -p ${OUTPUT_DIR}
 
     /usr/bin/time -f '%e' -o 'time.out' ${EXE} ${EXE_ARGS} > ${OUTPUT_DIR}/${OUTPUT_FILE}
-
-    TIME_FROM_OUTPUT=$(sed -n -E 's/CPU Time: (.*) sec/\1/p' ${OUTPUT_FILE})
+    TIME_FROM_OUTPUT=$(sed -n -E 's/CPU Time: (.*) sec/\1/p' ${OUTPUT_DIR}/${OUTPUT_FILE})
     TIME_FROM_TIME_CMD=$(cat time.out)
 
     printf " | %12s | %15.3f | %19.3f |\n" ${NTHREADS} ${TIME_FROM_OUTPUT} ${TIME_FROM_TIME_CMD}
