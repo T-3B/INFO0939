@@ -1,0 +1,38 @@
+S=C=A=N: Scalasca 2.6.1 runtime summarization
+S=C=A=N: ./scorep_myapp_instr_8x4_sum experiment archive
+S=C=A=N: Sat Jan 11 12:45:03 2025: Collect start
+/usr/bin/srun ./myapp_instr example_inputs/simple/param_simple.txt
+Parameters:
+ - grid spacing (dx, dy): 5 m, 5 m
+ - time step (dt): 0.05 s
+ - maximum time (max_t): 200 s
+ - gravitational acceleration (g): 9.81 m/s^2
+ - dissipation coefficient (gamma): 2e-05 1/s
+ - source type: 1
+ - sampling rate: 0
+ - input bathymetry (h) file: 'example_inputs/simple/h_simple.dat'
+ - output elevation (eta) file: 'example_inputs/simple/output/eta_simple'
+ - output velocity (u, v) files: 'example_inputs/simple/output/u_simple', 'example_inputs/simple/output/v_simple'
+ - 800x800 divided into 4x2 subdomains; grid size of rank 0: 1000 m x 2000 m (200 x 400 = 80000 grid points)
+ - number of time steps: 4000
+Computing step 400/4000 (ETA: 0.848045 seconds)
+Computing step 800/4000 (ETA: 0.705199 seconds)
+Computing step 1200/4000 (ETA: 0.61471 seconds)
+Computing step 1600/4000 (ETA: 0.534648 seconds)
+Computing step 2000/4000 (ETA: 0.45451 seconds)
+Computing step 2400/4000 (ETA: 0.375117 seconds)
+Computing step 2800/4000 (ETA: 0.287929 seconds)
+Computing step 3200/4000 (ETA: 0.195647 seconds)
+Computing step 3600/4000 (ETA: 0.0997301 seconds)
+[Score-P] src/services/timer/SCOREP_Timer.c:390: Warning: Calculated timer (tsc) frequencies differ from average frequency (2900068264 Hz) by more than 29000 Hz. Consider using a timer with a fixed frequency like gettimeofday or clock_gettime. Prolonging the measurement duration might mitigate the frequency variations.
+Done: 1.01912 seconds (316.354 MUpdates/s)
+rank[0]:	 frequency = 2900208523 Hz (outlier)
+rank[1]:	 frequency = 2900086084 Hz
+rank[2]:	 frequency = 2900066252 Hz
+rank[3]:	 frequency = 2900068895 Hz
+rank[4]:	 frequency = 2900031834 Hz (outlier)
+rank[5]:	 frequency = 2900033750 Hz (outlier)
+rank[6]:	 frequency = 2900024563 Hz (outlier)
+rank[7]:	 frequency = 2900026216 Hz (outlier)
+S=C=A=N: Sat Jan 11 12:45:07 2025: Collect done (status=0) 4s
+S=C=A=N: ./scorep_myapp_instr_8x4_sum complete.

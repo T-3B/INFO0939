@@ -4,7 +4,7 @@
 #SBATCH --partition=hmem
 #SBATCH --output=job_output_strong_mpi_%j.out
 #SBATCH --time=01:00:00
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --mem=0
 
 module purge
