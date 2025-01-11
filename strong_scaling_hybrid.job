@@ -13,8 +13,8 @@ module load OpenMPI
 MIN_THREADS=2
 MAX_THREADS=8
 MIN_RANKS=${SLURM_NNODES}
-EXE="$(realpath ./shallow_mpi_omp)"
-EXE_ARGS="$(realpath ./example_inputs/simple/param_simple.txt)"
+EXE=$(realpath ./shallow_mpi_omp)
+EXE_ARGS=$(realpath ./example_inputs/simple/param_simple.txt)
 
 echo ""
 echo " Strong scaling experiment start (hybrid)"

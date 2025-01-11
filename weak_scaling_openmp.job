@@ -10,9 +10,9 @@
 module purge
 module load GCC
 
-MAX_THREADS="${SLURM_CPUS_ON_NODE}"
-EXE="$(realpath ./shallow_omp)"
-EXE_ARGS="$(realpath ./example_inputs/simple/param_simple.txt)"
+MAX_THREADS=${SLURM_CPUS_ON_NODE}
+EXE=$(realpath ./shallow_omp)
+EXE_ARGS=$(realpath ./example_inputs/simple/param_simple.txt)
 
 echo ""
 echo " Weak scaling experiment start (OpenMP)"

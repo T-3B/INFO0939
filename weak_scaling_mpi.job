@@ -12,8 +12,8 @@ module load OpenMPI
 
 MIN_RANKS=${SLURM_NNODES}
 MAX_RANKS=$((SLURM_CPUS_ON_NODE * SLURM_NNODES))
-EXE="$(realpath ./shallow_mpi)"
-EXE_ARGS="$(realpath ./example_inputs/simple/param_simple.txt)"
+EXE=$(realpath ./shallow_mpi)
+EXE_ARGS=$(realpath ./example_inputs/simple/param_simple.txt)
 
 echo ""
 echo " Weak scaling experiment start (MPI)"
