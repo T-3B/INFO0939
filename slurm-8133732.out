@@ -1,3 +1,5 @@
+S=C=A=N: Scalasca 2.6.1 runtime summarization
+S=C=A=N: ./scorep_myapp_instr_8x4_sum experiment archive
 S=C=A=N: Sun Jan 12 11:21:17 2025: Collect start
 /usr/bin/srun ./myapp_instr example_inputs/simple/param_simple.txt
 Parameters:
@@ -24,3 +26,4 @@ Computing step 16000/20000 (ETA: 5.38592 seconds)
 Computing step 18000/20000 (ETA: 2.81371 seconds)
 Done: 29.1833 seconds (343.69 MUpdates/s)
 S=C=A=N: Sun Jan 12 11:21:49 2025: Collect done (status=0) 32s
+S=C=A=N: ./scorep_myapp_instr_8x4_sum complete.
