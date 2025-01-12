@@ -1,0 +1,46 @@
+
+Estimated aggregate size of event trace:                   64MB
+Estimated requirements for largest trace buffer (max_buf): 8MB
+Estimated memory requirements (SCOREP_TOTAL_MEMORY):       16MB
+(hint: When tracing set SCOREP_TOTAL_MEMORY=16MB to avoid intermediate flushes
+ or reduce requirements using USR regions filters.)
+
+flt     type max_buf[B]    visits time[s] time[%] time/visit[us]  region
+         ALL  8,337,637 1,344,410   23.86   100.0          17.75  ALL
+         OMP  4,448,556   768,096    9.01    37.8          11.74  OMP
+         MPI  2,952,286   288,088   13.69    57.4          47.52  MPI
+         USR    936,702   288,202    0.07     0.3           0.24  USR
+         COM         52        16    1.09     4.6       68104.52  COM
+      SCOREP         41         8    0.00     0.0          60.19  SCOREP
+
+         MPI  1,424,000   128,000    0.16     0.7           1.22  MPI_Irecv
+         MPI  1,424,000   128,000    1.68     7.0          13.13  MPI_Isend
+         OMP  1,392,000   128,000    0.04     0.2           0.28  ?$omp?parallel?@shallow.c:496
+         OMP  1,392,000   128,000    0.04     0.1           0.28  ?$omp?parallel?@shallow.c:506
+         USR    936,390   288,120    0.06     0.3           0.21  checkMPISuccess
+         OMP    416,000   128,000    4.84    20.3          37.83  ?$omp?for?@shallow.c:496
+         OMP    416,000   128,000    0.47     2.0           3.69  ?$omp?implicit?barrier?@shallow.c:505
+         OMP    416,000   128,000    3.16    13.3          24.71  ?$omp?for?@shallow.c:506
+         OMP    416,000   128,000    0.46     1.9           3.60  ?$omp?implicit?barrier?@shallow.c:518
+         MPI    103,974    31,992    2.89    12.1          90.28  MPI_Waitall
+         OMP        348        32    0.00     0.0           2.72  ?$omp?parallel?@shallow.c:277
+         USR        104        32    0.00     0.0           1.78  free_data
+         USR        104        32    0.00     0.0         102.88  init_data
+         OMP        104        32    0.00     0.0         120.24  ?$omp?for?@shallow.c:277
+         OMP        104        32    0.00     0.0          18.69  ?$omp?implicit?barrier?@shallow.c:301
+         MPI         52        16    0.00     0.0           1.32  MPI_Cart_shift
+         MPI         52        16    0.00     0.0           0.73  MPI_Comm_rank
+         MPI         52        16    0.00     0.0           1.05  MPI_Comm_size
+      SCOREP         41         8    0.00     0.0          60.19  myapp_instr
+         COM         26         8    1.09     4.6      135819.86  main
+         USR         26         1    0.00     0.0        1459.35  write_manifest_vtk
+         USR         26         1    0.00     0.0          26.81  print_parameters
+         USR         26         8    0.00     0.0         150.26  read_data
+         USR         26         8    0.00     0.0         392.64  read_parameters
+         COM         26         8    0.00     0.0         389.19  interpolate_data
+         MPI         26         8    0.00     0.0           0.84  MPI_Cart_coords
+         MPI         26         8    0.02     0.1        2747.48  MPI_Cart_create
+         MPI         26         8    0.00     0.0          38.05  MPI_Comm_free
+         MPI         26         8    0.00     0.0           6.24  MPI_Dims_create
+         MPI         26         8    0.01     0.0        1204.92  MPI_Finalize
+         MPI         26         8    8.93    37.4     1116637.27  MPI_Init
