@@ -481,6 +481,21 @@ int main(int argc, char **argv) {
           SET(&u, nx, j, u_right - param.dt * sqrt(param.g * GET(&h_interp, nx, j)) * (u_right - GET(&u, nx - 1, j)) / param.dx);
         }
       }
+    } else if (param.source_type == 4) {  // Young's interference
+      for (int j = ny; j--;) {
+        if (!has_left_neighbor) SET(&u, 0, j, 0.);
+        if (!has_right_neighbor) SET(&u, nx, j, 0.);
+      }
+      const int ny_middle = ny_total / 2 - ny_offset;
+      for (int i = nx; i--;) {
+        if (!has_down_neighbor) SET(&v, i, 0, 0.);
+        if (0 <= ny_middle && ny_middle <= ny && (i + nx_offset - nx_total / 3 < -8 || i + nx_offset - nx_total / 3 > 8) && (i + nx_offset - 2 * nx_total / 3 < -8 || i + nx_offset - 2 * nx_total / 3 > 8)) {
+          SET(&v, i, ny_middle, 0.);
+          SET(&u, i, ny_middle, 0.);
+          SET(&eta, i + is_using_mpi, ny_middle + is_using_mpi, 0.);
+        }
+        if (!has_up_neighbor) SET(&v, i, ny, AMP * sin(2 * M_PI * FREQ * t));
+      }
     } else {
       printf("Error: Unknown source type %d\n", param.source_type);
       ABORT();
