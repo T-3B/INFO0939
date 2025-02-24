@@ -31,7 +31,7 @@
       MPI_Abort(MPI_COMM_WORLD, code);
     }
   }
-  static inline void swap_adjacent(int *ptr) {
+  static inline void swap_adjacent(int *const ptr) {
     const int tmp = ptr[0];
     ptr[0] = ptr[1];
     ptr[1] = tmp;
@@ -256,14 +256,14 @@ static int init_data(struct data *const data, const int nx, const int ny, const 
   data->ny = ny;
   data->dx = dx;
   data->dy = dy;
-  data->values = val != 0. ? malloc(nx * ny * sizeof(double)) : calloc(nx * ny, sizeof(double));
+  data->values = malloc(nx * ny * sizeof(double));
   if (unlikely(!data->values)){
     printf("Error: Could not allocate data\n");
     return 1;
   }
-  if (val != 0.)
-    for (unsigned i = nx * ny; i--;)
-      data->values[i] = val;
+  #pragma omp parallel for
+  for (unsigned i = 0; i < nx * ny; i++)
+    data->values[i] = val;
   return 0;
 }
 
